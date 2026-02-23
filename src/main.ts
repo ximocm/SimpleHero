@@ -5,6 +5,7 @@ import {
   commitMoveFromHover,
   createGameState,
   getCurrentFloorNumber,
+  getHeroPanelViews,
   getCurrentRoom,
   getCurrentRoomCoordId,
   getTileAt,
@@ -58,16 +59,7 @@ app.innerHTML = `
   <!-- App Layout -->
   <div style="display:flex; gap:18px; align-items:flex-start; font-family: sans-serif; color:#cbd5e1;">
     <!-- Left Sidebar: Character Panels -->
-    <div style="display:flex; flex-direction:column; gap:12px; width:210px;">
-      <!-- Character Slot 1 -->
-      <div style="min-height:120px; padding:12px; background:rgba(15,23,42,0.55);">char1</div>
-      <!-- Character Slot 2 -->
-      <div style="min-height:120px; padding:12px; background:rgba(15,23,42,0.55);">char2</div>
-      <!-- Character Slot 3 -->
-      <div style="min-height:120px; padding:12px; background:rgba(15,23,42,0.55);">char3</div>
-      <!-- Character Slot 4 -->
-      <div style="min-height:120px; padding:12px; background:rgba(15,23,42,0.55);">char4 (when available)</div>
-    </div>
+    <div id="characterPanels" style="display:flex; flex-direction:column; gap:12px; width:220px;"></div>
 
     <!-- Center: Dungeon View -->
     <div>
@@ -97,9 +89,25 @@ app.innerHTML = `
 const canvas = requireElement<HTMLCanvasElement>('#gameCanvas');
 const minimapCanvas = requireElement<HTMLCanvasElement>('#minimapCanvas');
 const status = requireElement<HTMLDivElement>('#status');
+const characterPanels = requireElement<HTMLDivElement>('#characterPanels');
 
 const ctx = requireContext(canvas);
 const minimapCtx = requireContext(minimapCanvas);
+
+characterPanels.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+  const panel = target.closest<HTMLElement>('[data-hero-index]');
+  if (!panel) return;
+
+  const raw = panel.dataset.heroIndex;
+  const index = Number(raw);
+  if (!Number.isInteger(index)) return;
+
+  setActiveHeroIndex(state, index);
+  persistGameState(state);
+  renderCharacterPanels();
+});
 
 /**
  * Computes tile size that fits current room into canvas viewport.
@@ -252,6 +260,7 @@ function draw(): void {
 
   drawHud();
   drawMinimap();
+  renderCharacterPanels();
 }
 
 /**
@@ -317,6 +326,41 @@ function drawMinimap(): void {
 }
 
 /**
+ * Renders the left sidebar hero panels with live state.
+ * @returns Nothing.
+ */
+function renderCharacterPanels(): void {
+  const heroes = getHeroPanelViews(state);
+  characterPanels.innerHTML = heroes
+    .map((hero, index) => {
+      const hpPercent = hero.maxHp > 0 ? Math.max(0, Math.min(100, (hero.hp / hero.maxHp) * 100)) : 0;
+      const border = hero.isActive ? '#fbbf24' : 'rgba(148,163,184,0.25)';
+      const badgeLabel = hero.isReadyAtExit ? 'Ready' : hero.isActive ? 'Active' : 'Idle';
+      const badgeColor = hero.isReadyAtExit ? '#22c55e' : hero.isActive ? '#fbbf24' : '#94a3b8';
+
+      return `
+        <div
+          data-hero-index="${index}"
+          style="cursor:pointer; border:1px solid ${border}; min-height:126px; padding:12px; background:rgba(15,23,42,0.55);"
+        >
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div style="font-size:14px; font-weight:600;">${hero.classLetter} · ${hero.className}</div>
+            <div style="font-size:11px; color:${badgeColor};">${badgeLabel}</div>
+          </div>
+          <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">${hero.raceName}</div>
+          <div style="font-size:12px; margin-bottom:4px;">HP ${hero.hp}/${hero.maxHp}</div>
+          <div style="height:6px; background:rgba(148,163,184,0.25); margin-bottom:8px;">
+            <div style="width:${hpPercent}%; height:100%; background:#22c55e;"></div>
+          </div>
+          <div style="font-size:12px; color:#cbd5e1;">Body ${hero.body} · Mind ${hero.mind}</div>
+          <div style="font-size:11px; color:#94a3b8; margin-top:6px;">Floor ${hero.floorNumber} · Room ${hero.roomId}</div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+/**
  * Computes triangle vertices used as hero facing indicator.
  * @param cx Hero center x.
  * @param cy Hero center y.
@@ -379,4 +423,5 @@ window.addEventListener('beforeunload', () => {
   persistGameState(state);
 });
 
+renderCharacterPanels();
 tick();

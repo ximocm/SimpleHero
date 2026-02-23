@@ -2,12 +2,12 @@ import type { Coord, HeroState, PartyState } from '../data/dungeonTypes.js';
 
 const HERO_CLASSES: Array<'W' | 'R' | 'M'> = ['W', 'R', 'M'];
 
-export function createParty(roomId: string, spawnTiles: Coord[]): PartyState {
+export function createParty(roomId: string, startTiles: readonly Coord[]): PartyState {
   const heroes: HeroState[] = HERO_CLASSES.map((classLetter, index) => ({
     id: `hero-${index}`,
     classLetter,
     roomId,
-    tile: { ...spawnTiles[index] },
+    tile: { ...startTiles[index] },
     facing: 'S',
   }));
 

@@ -19,7 +19,6 @@ export interface RoomData {
   height: number;
   tiles: TileType[][];
   exits: Partial<Record<Direction, Coord>>;
-  spawnTiles: Coord[];
 }
 
 export interface HeroState {
@@ -37,6 +36,8 @@ export interface PartyState {
 
 export interface DungeonState {
   seed: number;
+  totalFloors: number;
+  floorByRoomId: Map<string, number>;
   rooms: Map<string, RoomData>;
   discoveredRoomIds: Set<string>;
   currentRoomId: string;

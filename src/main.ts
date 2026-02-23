@@ -4,6 +4,7 @@ import {
   canWalkTile,
   commitMoveFromHover,
   createGameState,
+  getCurrentFloorNumber,
   getCurrentRoom,
   getCurrentRoomCoordId,
   getTileAt,
@@ -16,6 +17,7 @@ import { inBounds, tileFromCanvas } from './utils/grid.js';
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 720;
 const HUD_HEIGHT = 64;
+const SHOW_FULL_DUNGEON_MAP = true;
 
 const state = createGameState(Date.now());
 
@@ -143,7 +145,6 @@ function draw(): void {
 
       if (tile === TileType.VOID_BLACK) ctx.fillStyle = '#000000';
       if (tile === TileType.FLOOR) ctx.fillStyle = '#6b7280';
-      if (tile === TileType.SPAWN) ctx.fillStyle = '#b91c1c';
       if (tile === TileType.EXIT) ctx.fillStyle = '#1d4ed8';
 
       ctx.fillRect(px, py, tileSize, tileSize);
@@ -205,7 +206,7 @@ function drawHud(): void {
   const active = state.party.heroes[state.party.activeHeroIndex];
   const ready = `${state.readyByHeroId.size}/3`;
   ctx.fillText(
-    `Room ${getCurrentRoomCoordId(state)} | Active ${active.classLetter} | Exit Ready ${ready}`,
+    `Floor ${getCurrentFloorNumber(state)}/${state.dungeon.totalFloors} | Room ${getCurrentRoomCoordId(state)} | Active ${active.classLetter} | Exit Ready ${ready}`,
     12,
     canvas.height - HUD_HEIGHT / 2,
   );
@@ -218,7 +219,11 @@ function drawMinimap(): void {
   minimapCtx.fillStyle = '#020617';
   minimapCtx.fillRect(0, 0, minimapCanvas.width, minimapCanvas.height);
 
-  const coords = Array.from(state.dungeon.discoveredRoomIds).map((id) => {
+  const roomIds = SHOW_FULL_DUNGEON_MAP
+    ? Array.from(state.dungeon.rooms.keys())
+    : Array.from(state.dungeon.discoveredRoomIds);
+
+  const coords = roomIds.map((id) => {
     const [x, y] = id.split(',').map(Number);
     return { id, x, y };
   });

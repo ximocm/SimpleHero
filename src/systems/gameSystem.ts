@@ -8,7 +8,7 @@ import {
 } from '../utils/coord.js';
 import { inBounds } from '../utils/grid.js';
 import { findPathAStar } from '../utils/pathfinding.js';
-import { createDungeonState, getOrCreateRoom } from './dungeonStateSystem.js';
+import { createDungeonState, getRoomAt } from './dungeonStateSystem.js';
 import { createParty, getActiveHero, setActiveHero } from './partySystem.js';
 
 export interface GameState {
@@ -26,7 +26,9 @@ export function createGameState(seed: number): GameState {
     throw new Error('Initial room missing');
   }
 
-  const party = createParty(room.id, room.spawnTiles);
+  const center = { x: Math.floor(room.width / 2), y: Math.floor(room.height / 2) };
+  const initialStartTiles = getClosestWalkableTiles(room, center, 3);
+  const party = createParty(room.id, initialStartTiles);
 
   return {
     dungeon,
@@ -115,23 +117,68 @@ function maybeTransitionRoom(state: GameState): void {
 
   const current = getCurrentRoom(state);
   const nextCoord = moveRoomCoord(current.coord, direction);
-  const nextRoom = getOrCreateRoom(state.dungeon, nextCoord);
+  const nextRoom = getRoomAt(state.dungeon, nextCoord);
+  if (!nextRoom) return;
 
   state.dungeon.currentRoomId = nextRoom.id;
   state.dungeon.discoveredRoomIds.add(nextRoom.id);
 
   const opposite = oppositeDirection(direction);
-  const entry = nextRoom.exits[opposite] ?? nextRoom.spawnTiles[0];
-  const spawnTargets = [entry, ...nextRoom.spawnTiles].slice(0, 3);
+  const entry = nextRoom.exits[opposite];
+  if (!entry) {
+    throw new Error(`Room ${nextRoom.id} is missing entry exit ${opposite}.`);
+  }
+  const startTiles = getClosestWalkableTiles(nextRoom, entry, 3);
 
   state.party.heroes.forEach((hero, index) => {
     hero.roomId = nextRoom.id;
-    hero.tile = { ...spawnTargets[index] };
+    hero.tile = { ...startTiles[index] };
   });
 
   state.readyByHeroId.clear();
   state.hoverPath = [];
   state.movingPath = [];
+}
+
+function getClosestWalkableTiles(room: RoomData, origin: Coord, count: number): Coord[] {
+  const walkable: Coord[] = [];
+
+  for (let y = 0; y < room.height; y += 1) {
+    for (let x = 0; x < room.width; x += 1) {
+      const coord = { x, y };
+      if (!canWalkTile(room, coord)) continue;
+      walkable.push(coord);
+    }
+  }
+
+  walkable.sort((a, b) => {
+    const da = manhattanDistance(a, origin);
+    const db = manhattanDistance(b, origin);
+    if (da !== db) return da - db;
+    if (a.y !== b.y) return a.y - b.y;
+    return a.x - b.x;
+  });
+
+  const selected = walkable.slice(0, count);
+  if (selected.length >= count) return selected;
+
+  if (
+    selected.length < count &&
+    canWalkTile(room, origin) &&
+    !selected.some((coord) => sameCoord(coord, origin))
+  ) {
+    selected.push(origin);
+  }
+
+  if (selected.length < count) {
+    throw new Error(`Room ${room.id} does not contain enough walkable tiles for party start.`);
+  }
+
+  return selected;
+}
+
+function manhattanDistance(a: Coord, b: Coord): number {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
 export function getTileAt(room: RoomData, coord: Coord): TileType {
@@ -141,4 +188,8 @@ export function getTileAt(room: RoomData, coord: Coord): TileType {
 
 export function getCurrentRoomCoordId(state: GameState): string {
   return roomIdFromCoord(getCurrentRoom(state).coord);
+}
+
+export function getCurrentFloorNumber(state: GameState): number {
+  return state.dungeon.floorByRoomId.get(state.dungeon.currentRoomId) ?? 1;
 }

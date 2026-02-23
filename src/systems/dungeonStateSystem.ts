@@ -14,6 +14,11 @@ const FLOOR_COUNT_WEIGHTS: Array<{ floors: number; weight: number }> = [
 
 const DIRECTIONS: Direction[] = ['N', 'E', 'S', 'W'];
 
+/**
+ * Creates full dungeon state, including pre-generated floors and rooms.
+ * @param seed Run seed.
+ * @returns Initialized dungeon state.
+ */
 export function createDungeonState(seed: number): DungeonState {
   const totalFloors = rollFloorCount(seed);
   const coords = generateFloorCoords(seed, totalFloors);
@@ -39,10 +44,21 @@ export function createDungeonState(seed: number): DungeonState {
   };
 }
 
+/**
+ * Retrieves a pre-generated room at coordinate.
+ * @param state Dungeon state.
+ * @param coord Room coordinate.
+ * @returns Room data when present; otherwise `undefined`.
+ */
 export function getRoomAt(state: DungeonState, coord: RoomCoord): RoomData | undefined {
   return state.rooms.get(roomIdFromCoord(coord));
 }
 
+/**
+ * Rolls total floor count using configured weighted distribution.
+ * @param seed Run seed.
+ * @returns Number of floors between 3 and 7.
+ */
 function rollFloorCount(seed: number): number {
   const rng = createRng(seedFromRoom(seed, 'dungeon-floor-count'));
   const totalWeight = FLOOR_COUNT_WEIGHTS.reduce((sum, item) => sum + item.weight, 0);
@@ -57,6 +73,12 @@ function rollFloorCount(seed: number): number {
   return FLOOR_COUNT_WEIGHTS[FLOOR_COUNT_WEIGHTS.length - 1].floors;
 }
 
+/**
+ * Generates connected room coordinates for all dungeon floors.
+ * @param seed Run seed.
+ * @param totalFloors Number of floors to generate.
+ * @returns Ordered room coordinates from start to end floor.
+ */
 function generateFloorCoords(seed: number, totalFloors: number): RoomCoord[] {
   const rng = createRng(seedFromRoom(seed, 'dungeon-layout'));
   const coords: RoomCoord[] = [{ x: 0, y: 0 }];
@@ -80,6 +102,11 @@ function generateFloorCoords(seed: number, totalFloors: number): RoomCoord[] {
   return coords;
 }
 
+/**
+ * Removes exits that lead to non-generated rooms.
+ * @param rooms Map of generated rooms keyed by room id.
+ * @returns Nothing.
+ */
 function pruneDisconnectedExits(rooms: Map<string, RoomData>): void {
   for (const room of rooms.values()) {
     for (const [direction, exitCoord] of Object.entries(room.exits) as Array<

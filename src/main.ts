@@ -26,6 +26,11 @@ if (!app) {
   throw new Error('Missing #app root');
 }
 
+/**
+ * Queries a required DOM element and throws when missing.
+ * @param selector CSS selector for the target element.
+ * @returns Matched DOM element.
+ */
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
   if (!element) {
@@ -34,6 +39,11 @@ function requireElement<T extends Element>(selector: string): T {
   return element;
 }
 
+/**
+ * Retrieves 2D canvas rendering context.
+ * @param canvasElement Canvas element.
+ * @returns 2D rendering context.
+ */
 function requireContext(canvasElement: HTMLCanvasElement): CanvasRenderingContext2D {
   const context = canvasElement.getContext('2d');
   if (!context) {
@@ -89,6 +99,10 @@ const status = requireElement<HTMLDivElement>('#status');
 const ctx = requireContext(canvas);
 const minimapCtx = requireContext(minimapCanvas);
 
+/**
+ * Computes tile size that fits current room into canvas viewport.
+ * @returns Tile size in pixels.
+ */
 function getTileSize(): number {
   const room = getCurrentRoom(state);
   const maxW = canvas.width;
@@ -96,6 +110,11 @@ function getTileSize(): number {
   return Math.floor(Math.min(maxW / room.width, maxH / room.height));
 }
 
+/**
+ * Computes top-left board offset used to center room in canvas.
+ * @param tileSize Tile size in pixels.
+ * @returns Board offset coordinate.
+ */
 function getBoardOffset(tileSize: number): Coord {
   const room = getCurrentRoom(state);
   const boardW = room.width * tileSize;
@@ -159,6 +178,10 @@ window.addEventListener('keydown', (event) => {
   if (event.key === '3') setActiveHeroIndex(state, 2);
 });
 
+/**
+ * Draws one full frame: room, path preview, heroes, HUD and minimap.
+ * @returns Nothing.
+ */
 function draw(): void {
   const room = getCurrentRoom(state);
   const tileSize = getTileSize();
@@ -225,6 +248,10 @@ function draw(): void {
   drawMinimap();
 }
 
+/**
+ * Draws bottom HUD strip with room/floor and readiness info.
+ * @returns Nothing.
+ */
 function drawHud(): void {
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, canvas.height - HUD_HEIGHT, canvas.width, HUD_HEIGHT);
@@ -245,6 +272,10 @@ function drawHud(): void {
   status.textContent = `Discovered rooms: ${state.dungeon.discoveredRoomIds.size}`;
 }
 
+/**
+ * Draws dungeon minimap using either discovered rooms or full map.
+ * @returns Nothing.
+ */
 function drawMinimap(): void {
   minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
   minimapCtx.fillStyle = '#020617';
@@ -279,6 +310,14 @@ function drawMinimap(): void {
   });
 }
 
+/**
+ * Computes triangle vertices used as hero facing indicator.
+ * @param cx Hero center x.
+ * @param cy Hero center y.
+ * @param r Hero radius.
+ * @param facing Hero facing direction.
+ * @returns Three vertices for the direction triangle.
+ */
 function facingTriangle(
   cx: number,
   cy: number,
@@ -313,6 +352,10 @@ function facingTriangle(
   ];
 }
 
+/**
+ * Main animation loop.
+ * @returns Nothing.
+ */
 function tick(): void {
   stepMovement(state);
   draw();

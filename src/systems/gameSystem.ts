@@ -19,6 +19,11 @@ export interface GameState {
   readyByHeroId: Map<string, Direction>;
 }
 
+/**
+ * Creates the full game state from a seed.
+ * @param seed Run seed.
+ * @returns Initialized game state.
+ */
 export function createGameState(seed: number): GameState {
   const dungeon = createDungeonState(seed);
   const room = dungeon.rooms.get(dungeon.currentRoomId);
@@ -39,18 +44,35 @@ export function createGameState(seed: number): GameState {
   };
 }
 
+/**
+ * Gets the currently active room from dungeon state.
+ * @param state Game state.
+ * @returns Current room data.
+ */
 export function getCurrentRoom(state: GameState): RoomData {
   const room = state.dungeon.rooms.get(state.dungeon.currentRoomId);
   if (!room) throw new Error('Current room missing');
   return room;
 }
 
+/**
+ * Sets the active hero index and clears pending paths.
+ * @param state Game state to mutate.
+ * @param index Hero index to activate.
+ * @returns Nothing.
+ */
 export function setActiveHeroIndex(state: GameState, index: number): void {
   setActiveHero(state.party, index);
   state.hoverPath = [];
   state.movingPath = [];
 }
 
+/**
+ * Recomputes hover path for active hero to target tile.
+ * @param state Game state to mutate.
+ * @param target Destination tile.
+ * @returns Nothing.
+ */
 export function updateHoverPath(state: GameState, target: Coord): void {
   const room = getCurrentRoom(state);
   const hero = getActiveHero(state.party);
@@ -63,6 +85,11 @@ export function updateHoverPath(state: GameState, target: Coord): void {
   );
 }
 
+/**
+ * Commits current hover path as movement path.
+ * @param state Game state to mutate.
+ * @returns Nothing.
+ */
 export function commitMoveFromHover(state: GameState): void {
   const hero = getActiveHero(state.party);
   if (state.readyByHeroId.has(hero.id)) return;
@@ -70,6 +97,11 @@ export function commitMoveFromHover(state: GameState): void {
   state.movingPath = [...state.hoverPath];
 }
 
+/**
+ * Advances active hero by one step in movement path.
+ * @param state Game state to mutate.
+ * @returns `true` when hero moved this tick, else `false`.
+ */
 export function stepMovement(state: GameState): boolean {
   const hero = getActiveHero(state.party);
   if (state.readyByHeroId.has(hero.id)) return false;
@@ -91,11 +123,24 @@ export function stepMovement(state: GameState): boolean {
   return true;
 }
 
+/**
+ * Checks if a tile is within room bounds and walkable.
+ * @param room Room to evaluate.
+ * @param coord Coordinate to test.
+ * @returns `true` when tile can be walked on.
+ */
 export function canWalkTile(room: RoomData, coord: Coord): boolean {
   if (!inBounds(coord, room.width, room.height)) return false;
   return isWalkable(room.tiles[coord.y][coord.x]);
 }
 
+/**
+ * Updates hero facing based on movement direction.
+ * @param from Previous tile.
+ * @param to Next tile.
+ * @param hero Hero object to mutate.
+ * @returns Nothing.
+ */
 function updateFacing(from: Coord, to: Coord, hero: PartyState['heroes'][number]): void {
   if (to.x > from.x) hero.facing = 'E';
   else if (to.x < from.x) hero.facing = 'W';
@@ -103,6 +148,13 @@ function updateFacing(from: Coord, to: Coord, hero: PartyState['heroes'][number]
   else if (to.y < from.y) hero.facing = 'N';
 }
 
+/**
+ * Marks/unmarks hero as ready when standing on an exit.
+ * @param state Game state to mutate.
+ * @param heroId Hero identifier.
+ * @param tile Hero tile coordinate.
+ * @returns Nothing.
+ */
 function refreshExitReady(state: GameState, heroId: string, tile: Coord): void {
   const room = getCurrentRoom(state);
   const direction = findExitDirection(room, tile);
@@ -113,6 +165,12 @@ function refreshExitReady(state: GameState, heroId: string, tile: Coord): void {
   }
 }
 
+/**
+ * Finds which exit direction a tile belongs to.
+ * @param room Room to inspect.
+ * @param tile Tile to match.
+ * @returns Matching direction, or `null` if tile is not an exit.
+ */
 function findExitDirection(room: RoomData, tile: Coord): Direction | null {
   const entries = Object.entries(room.exits) as Array<[Direction, Coord | undefined]>;
   for (const [direction, coord] of entries) {
@@ -121,6 +179,11 @@ function findExitDirection(room: RoomData, tile: Coord): Direction | null {
   return null;
 }
 
+/**
+ * Transitions party to next room when all heroes are ready on same exit.
+ * @param state Game state to mutate.
+ * @returns Nothing.
+ */
 function maybeTransitionRoom(state: GameState): void {
   if (state.readyByHeroId.size !== 3) return;
 
@@ -153,6 +216,13 @@ function maybeTransitionRoom(state: GameState): void {
   state.movingPath = [];
 }
 
+/**
+ * Selects nearest walkable tiles to an origin coordinate.
+ * @param room Room to search.
+ * @param origin Origin coordinate.
+ * @param count Number of tiles to return.
+ * @returns Ordered closest walkable coordinates.
+ */
 function getClosestWalkableTiles(room: RoomData, origin: Coord, count: number): Coord[] {
   const walkable: Coord[] = [];
 
@@ -190,10 +260,24 @@ function getClosestWalkableTiles(room: RoomData, origin: Coord, count: number): 
   return selected;
 }
 
+/**
+ * Calculates Manhattan distance between two coordinates.
+ * @param a First coordinate.
+ * @param b Second coordinate.
+ * @returns Manhattan distance.
+ */
 function manhattanDistance(a: Coord, b: Coord): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
+/**
+ * Checks whether a tile is occupied by another (visible) hero.
+ * @param state Game state.
+ * @param roomId Room where occupancy is checked.
+ * @param coord Tile coordinate to check.
+ * @param currentHeroId Hero id that should be ignored.
+ * @returns `true` when another hero occupies the tile.
+ */
 function isTileOccupiedByOtherHero(
   state: GameState,
   roomId: string,
@@ -210,15 +294,31 @@ function isTileOccupiedByOtherHero(
   );
 }
 
+/**
+ * Returns tile type at coordinate, treating out-of-bounds as void.
+ * @param room Room data.
+ * @param coord Tile coordinate.
+ * @returns Tile type at coordinate.
+ */
 export function getTileAt(room: RoomData, coord: Coord): TileType {
   if (!inBounds(coord, room.width, room.height)) return TileType.VOID_BLACK;
   return room.tiles[coord.y][coord.x];
 }
 
+/**
+ * Returns current room id string.
+ * @param state Game state.
+ * @returns Current room id.
+ */
 export function getCurrentRoomCoordId(state: GameState): string {
   return roomIdFromCoord(getCurrentRoom(state).coord);
 }
 
+/**
+ * Returns current floor number within generated dungeon.
+ * @param state Game state.
+ * @returns Current floor index starting at 1.
+ */
 export function getCurrentFloorNumber(state: GameState): number {
   return state.dungeon.floorByRoomId.get(state.dungeon.currentRoomId) ?? 1;
 }

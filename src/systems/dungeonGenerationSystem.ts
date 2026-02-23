@@ -11,6 +11,12 @@ const EXIT_BY_MARKER: Record<string, Direction> = {
   W: 'W',
 };
 
+/**
+ * Creates room data by selecting and parsing a room template.
+ * @param runSeed Global run seed.
+ * @param coord Room coordinate.
+ * @returns Generated room data.
+ */
 export function createRoom(runSeed: number, coord: RoomCoord): RoomData {
   const template = chooseRoomTemplate(runSeed, coord);
   const id = roomIdFromCoord(coord);
@@ -26,6 +32,11 @@ export function createRoom(runSeed: number, coord: RoomCoord): RoomData {
   };
 }
 
+/**
+ * Parses a matrix template into tile grid and exits.
+ * @param template Template to parse.
+ * @returns Parsed room dimensions, tiles and exits.
+ */
 function parseTemplate(template: RoomTemplate): {
   width: number;
   height: number;

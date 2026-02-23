@@ -7,10 +7,23 @@ interface Node {
   f: number;
 }
 
+/**
+ * Manhattan distance used as A* heuristic.
+ * @param a Source coordinate.
+ * @param b Target coordinate.
+ * @returns Estimated cost between both coordinates.
+ */
 function heuristic(a: Coord, b: Coord): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
+/**
+ * Finds a shortest walkable path using A* on a 4-neighbor grid.
+ * @param start Start coordinate.
+ * @param goal Goal coordinate.
+ * @param canWalk Walkability predicate per coordinate.
+ * @returns Path from start to goal (inclusive), or empty when no path exists.
+ */
 export function findPathAStar(
   start: Coord,
   goal: Coord,
@@ -64,6 +77,12 @@ export function findPathAStar(
   return [];
 }
 
+/**
+ * Reconstructs a path from predecessor links.
+ * @param goal Path goal coordinate.
+ * @param cameFrom Map of node key -> predecessor key.
+ * @returns Reconstructed path from start to goal.
+ */
 function reconstruct(goal: Coord, cameFrom: Map<string, string>): Coord[] {
   const path: Coord[] = [goal];
   let currentKey = coordKey(goal);

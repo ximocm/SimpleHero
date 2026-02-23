@@ -1,4 +1,11 @@
-import type { Coord, Direction, HeroState, RoomData } from '../data/dungeonTypes.js';
+import type {
+  Coord,
+  Direction,
+  HeroClassName,
+  HeroRaceName,
+  HeroState,
+  RoomData,
+} from '../data/dungeonTypes.js';
 import { createGameState, type GameState } from './gameSystem.js';
 import { inBounds } from '../utils/grid.js';
 import { isWalkable, TileType } from '../data/tileTypes.js';
@@ -6,22 +13,48 @@ import { isWalkable, TileType } from '../data/tileTypes.js';
 const SAVE_KEY = 'simplehero.autosave.v1';
 const HERO_COUNT = 3;
 
+interface PersistedDungeonState {
+  seed: number;
+  totalFloors: number;
+  currentRoomId: string;
+  discoveredRoomIds: string[];
+  floorByRoomId: Array<[string, number]>;
+  rooms: RoomData[];
+}
+
+interface PersistedHeroV1 {
+  id: string;
+  classLetter: 'W' | 'R' | 'M';
+  roomId: string;
+  tile: Coord;
+  facing: Direction;
+}
+
+interface PersistedPartyStateV1 {
+  activeHeroIndex: number;
+  heroes: PersistedHeroV1[];
+}
+
+interface PersistedPartyStateV2 {
+  activeHeroIndex: number;
+  heroes: HeroState[];
+}
+
 interface PersistedGameStateV1 {
   version: 1;
   savedAt: number;
-  dungeon: {
-    seed: number;
-    totalFloors: number;
-    currentRoomId: string;
-    discoveredRoomIds: string[];
-    floorByRoomId: Array<[string, number]>;
-    rooms: RoomData[];
-  };
-  party: {
-    activeHeroIndex: number;
-    heroes: HeroState[];
-  };
+  dungeon: PersistedDungeonState;
+  party: PersistedPartyStateV1;
 }
+
+interface PersistedGameStateV2 {
+  version: 2;
+  savedAt: number;
+  dungeon: PersistedDungeonState;
+  party: PersistedPartyStateV2;
+}
+
+type PersistedSnapshot = PersistedGameStateV1 | PersistedGameStateV2;
 
 /**
  * Loads and restores game state from localStorage, if available and valid.
@@ -32,8 +65,8 @@ export function loadPersistedGameState(): GameState | null {
   if (!raw) return null;
 
   try {
-    const data = JSON.parse(raw) as PersistedGameStateV1;
-    if (data.version !== 1) return null;
+    const data = JSON.parse(raw) as PersistedSnapshot;
+    if (data.version !== 1 && data.version !== 2) return null;
     return restoreFromSnapshot(data);
   } catch {
     return null;
@@ -46,8 +79,8 @@ export function loadPersistedGameState(): GameState | null {
  * @returns Nothing.
  */
 export function persistGameState(state: GameState): void {
-  const snapshot: PersistedGameStateV1 = {
-    version: 1,
+  const snapshot: PersistedGameStateV2 = {
+    version: 2,
     savedAt: Date.now(),
     dungeon: {
       seed: state.dungeon.seed,
@@ -74,7 +107,7 @@ export function clearPersistedGameState(): void {
   localStorage.removeItem(SAVE_KEY);
 }
 
-function restoreFromSnapshot(snapshot: PersistedGameStateV1): GameState | null {
+function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
   if (!Number.isFinite(snapshot.dungeon.seed)) return null;
   if (!Array.isArray(snapshot.dungeon.rooms)) return null;
   if (!Array.isArray(snapshot.party.heroes)) return null;
@@ -112,17 +145,25 @@ function restoreFromSnapshot(snapshot: PersistedGameStateV1): GameState | null {
   state.dungeon.discoveredRoomIds = discovered;
 
   const restoredHeroes = snapshot.party.heroes.slice(0, HERO_COUNT).map((hero, index) => {
+    const maybeHero = hero as Partial<HeroState>;
     const base = fallback.party.heroes[index];
     const safeRoomId = rooms.has(hero.roomId) ? hero.roomId : currentRoomId;
     const safeTile = sanitizeHeroTile(hero.tile, rooms.get(safeRoomId), base.tile);
+    const maxHp = Math.max(1, toInt(maybeHero.maxHp, base.maxHp));
 
     return {
       ...base,
-      id: hero.id,
-      classLetter: hero.classLetter,
+      id: typeof hero.id === 'string' && hero.id.length > 0 ? hero.id : base.id,
+      classLetter: sanitizeClassLetter(hero.classLetter, base.classLetter),
+      className: sanitizeClassName(maybeHero, base.className),
+      raceName: sanitizeRaceName(maybeHero, base.raceName),
+      hp: clamp(toInt(maybeHero.hp, base.hp), 0, maxHp),
+      maxHp,
+      body: Math.max(0, toInt(maybeHero.body, base.body)),
+      mind: Math.max(0, toInt(maybeHero.mind, base.mind)),
       roomId: safeRoomId,
       tile: safeTile,
-      facing: hero.facing as Direction,
+      facing: sanitizeFacing(hero.facing, base.facing),
     };
   });
 
@@ -149,6 +190,38 @@ function sanitizeHeroTile(tile: Coord, room: RoomData | undefined, fallback: Coo
   if (!inBounds(tile, room.width, room.height)) return { ...fallback };
   if (!isWalkable(room.tiles[tile.y][tile.x] as TileType)) return { ...fallback };
   return { ...tile };
+}
+
+function sanitizeClassLetter(value: unknown, fallback: HeroState['classLetter']): HeroState['classLetter'] {
+  if (value === 'W' || value === 'R' || value === 'M') return value;
+  return fallback;
+}
+
+function sanitizeClassName(hero: Partial<HeroState>, fallback: HeroClassName): HeroClassName {
+  if (hero.className === 'Warrior' || hero.className === 'Ranger' || hero.className === 'Mage') {
+    return hero.className;
+  }
+
+  if (hero.classLetter === 'W') return 'Warrior';
+  if (hero.classLetter === 'R') return 'Ranger';
+  if (hero.classLetter === 'M') return 'Mage';
+  return fallback;
+}
+
+function sanitizeRaceName(hero: Partial<HeroState>, fallback: HeroRaceName): HeroRaceName {
+  if (hero.raceName === 'Human' || hero.raceName === 'Elf' || hero.raceName === 'Orc') {
+    return hero.raceName;
+  }
+  return fallback;
+}
+
+function sanitizeFacing(value: unknown, fallback: Direction): Direction {
+  if (value === 'N' || value === 'E' || value === 'S' || value === 'W') return value;
+  return fallback;
+}
+
+function toInt(value: unknown, fallback: number): number {
+  return Number.isFinite(value) ? (value as number) | 0 : fallback;
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -1,13 +1,10 @@
 # Docs Index
 
-- `gdd.md`: Main game design document.
-- `races.md`: Race definitions and rules.
-- `classes.md`: Class definitions and skills.
-- `enemies.md`: Enemy definitions.
-- `items.md`: Item definitions.
-- `balance.md`: Combat/balance rules.
-- `gameplay/`: Gameplay flow and mechanics notes.
+- `gdd.md`: Main game design document and MVP scope.
+- `races.md`: Race stats and movement model.
+- `classes.md`: Class roles, skills, and spell behavior.
+- `enemies.md`: Concrete MVP enemy roster and spawn rules.
+- `items.md`: Equipment, shield, consumables, and derived stat rules.
+- `balance.md`: Combat resolution order and economy values.
 - `art/`: Art direction and asset notes.
 - `audio/`: Music and SFX notes.
-- `technical/`: Technical architecture and implementation notes.
-- `production/`: Milestones, tasks, and planning notes.

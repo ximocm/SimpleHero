@@ -74,7 +74,7 @@
 - Recommended engine: Phaser 3 + TypeScript.
 - Target browsers: latest Chrome and Firefox.
 - Target performance: 60 FPS on average laptop.
-- Save system (MVP): save only total gold between runs.
+- Save system (MVP): automatic local autosave of current run state (seed, dungeon progress, party state) to recover from accidental reloads.
 
 ## 7. Future
 - More races.

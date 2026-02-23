@@ -12,6 +12,7 @@ import {
   stepMovement,
   updateHoverPath,
 } from './systems/gameSystem.js';
+import { loadPersistedGameState, persistGameState } from './systems/persistenceSystem.js';
 import { inBounds, tileFromCanvas } from './utils/grid.js';
 
 const CANVAS_WIDTH = 960;
@@ -19,7 +20,8 @@ const CANVAS_HEIGHT = 720;
 const HUD_HEIGHT = 64;
 const SHOW_FULL_DUNGEON_MAP = true;
 
-const state = createGameState(Date.now());
+const state = loadPersistedGameState() ?? createGameState(Date.now());
+persistGameState(state);
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -170,12 +172,16 @@ canvas.addEventListener('click', (event) => {
 
   updateHoverPath(state, target);
   commitMoveFromHover(state);
+  persistGameState(state);
 });
 
 window.addEventListener('keydown', (event) => {
   if (event.key === '1') setActiveHeroIndex(state, 0);
   if (event.key === '2') setActiveHeroIndex(state, 1);
   if (event.key === '3') setActiveHeroIndex(state, 2);
+  if (event.key === '1' || event.key === '2' || event.key === '3') {
+    persistGameState(state);
+  }
 });
 
 /**
@@ -357,9 +363,20 @@ function facingTriangle(
  * @returns Nothing.
  */
 function tick(): void {
-  stepMovement(state);
+  const moved = stepMovement(state);
+  if (moved) {
+    persistGameState(state);
+  }
   draw();
   requestAnimationFrame(tick);
 }
+
+window.setInterval(() => {
+  persistGameState(state);
+}, 3000);
+
+window.addEventListener('beforeunload', () => {
+  persistGameState(state);
+});
 
 tick();

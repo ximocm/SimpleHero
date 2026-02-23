@@ -43,13 +43,42 @@ function requireContext(canvasElement: HTMLCanvasElement): CanvasRenderingContex
 }
 
 app.innerHTML = `
-  <div style="display:flex; gap:12px; align-items:flex-start; font-family: sans-serif; color:#e5e7eb;">
+  <!-- App Layout -->
+  <div style="display:flex; gap:18px; align-items:flex-start; font-family: sans-serif; color:#cbd5e1;">
+    <!-- Left Sidebar: Character Panels -->
+    <div style="display:flex; flex-direction:column; gap:12px; width:210px;">
+      <!-- Character Slot 1 -->
+      <div style="min-height:120px; padding:12px; background:rgba(15,23,42,0.55);">char1</div>
+      <!-- Character Slot 2 -->
+      <div style="min-height:120px; padding:12px; background:rgba(15,23,42,0.55);">char2</div>
+      <!-- Character Slot 3 -->
+      <div style="min-height:120px; padding:12px; background:rgba(15,23,42,0.55);">char3</div>
+      <!-- Character Slot 4 -->
+      <div style="min-height:120px; padding:12px; background:rgba(15,23,42,0.55);">char4 (when available)</div>
+    </div>
+
+    <!-- Center: Dungeon View -->
     <div>
-      <canvas id="gameCanvas" width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" style="border:1px solid #334155; background:#0b1020"></canvas>
+      <!-- Main Dungeon Canvas -->
+      <canvas id="gameCanvas" width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" style="background:transparent"></canvas>
+      <!-- Status Line -->
       <div id="status" style="margin-top:8px; color:#cbd5e1; font-size:14px;"></div>
+      <!-- Controls Hint -->
       <div style="margin-top:8px; color:#94a3b8; font-size:12px;">Mouse hover = A* preview | Click = move | 1/2/3 = active hero</div>
     </div>
-    <canvas id="minimapCanvas" width="220" height="220" style="border:1px solid #334155; background:#020617"></canvas>
+
+    <!-- Right Sidebar: Map and Party Resources -->
+    <div style="display:flex; flex-direction:column; gap:12px; width:220px;">
+      <!-- Minimap -->
+      <canvas id="minimapCanvas" width="220" height="220" style="background:transparent"></canvas>
+      <!-- Gold + Inventory Panel -->
+      <div style="min-height:320px; padding:12px; background:rgba(15,23,42,0.55);">
+        <!-- Gold Section -->
+        <div style="margin-bottom:12px;">gold</div>
+        <!-- Party Inventory Section -->
+        <div>party inventory</div>
+      </div>
+    </div>
   </div>
 `;
 
@@ -140,10 +169,10 @@ function draw(): void {
   for (let y = 0; y < room.height; y += 1) {
     for (let x = 0; x < room.width; x += 1) {
       const tile = room.tiles[y][x];
+      if (tile === TileType.VOID_BLACK) continue;
       const px = offset.x + x * tileSize;
       const py = offset.y + y * tileSize;
 
-      if (tile === TileType.VOID_BLACK) ctx.fillStyle = '#000000';
       if (tile === TileType.FLOOR) ctx.fillStyle = '#6b7280';
       if (tile === TileType.EXIT) ctx.fillStyle = '#1d4ed8';
 

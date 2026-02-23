@@ -161,6 +161,7 @@ function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
       maxHp,
       body: Math.max(0, toInt(maybeHero.body, base.body)),
       mind: Math.max(0, toInt(maybeHero.mind, base.mind)),
+      equipment: sanitizeEquipment(maybeHero.equipment, base.equipment),
       roomId: safeRoomId,
       tile: safeTile,
       facing: sanitizeFacing(hero.facing, base.facing),
@@ -227,4 +228,22 @@ function toInt(value: unknown, fallback: number): number {
 function clamp(value: number, min: number, max: number): number {
   if (Number.isNaN(value)) return min;
   return Math.max(min, Math.min(max, value));
+}
+
+function sanitizeEquipment(
+  value: unknown,
+  fallback: HeroState['equipment'],
+): HeroState['equipment'] {
+  if (!value || typeof value !== 'object') return { ...fallback, backpack: [...fallback.backpack] };
+
+  const v = value as Partial<HeroState['equipment']>;
+  return {
+    armor: typeof v.armor === 'string' ? v.armor : null,
+    leftHand: typeof v.leftHand === 'string' ? v.leftHand : null,
+    rightHand: typeof v.rightHand === 'string' ? v.rightHand : null,
+    relic: typeof v.relic === 'string' ? v.relic : null,
+    backpack: Array.isArray(v.backpack)
+      ? v.backpack.filter((item): item is string => typeof item === 'string')
+      : [],
+  };
 }

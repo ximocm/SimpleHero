@@ -28,6 +28,11 @@ export interface HeroPanelView {
   maxHp: number;
   body: number;
   mind: number;
+  armor: string | null;
+  leftHand: string | null;
+  rightHand: string | null;
+  relic: string | null;
+  backpackCount: number;
   roomId: string;
   floorNumber: number;
   isActive: boolean;
@@ -353,6 +358,11 @@ export function getHeroPanelViews(state: GameState): HeroPanelView[] {
     maxHp: hero.maxHp,
     body: hero.body,
     mind: hero.mind,
+    armor: hero.equipment.armor,
+    leftHand: hero.equipment.leftHand,
+    rightHand: hero.equipment.rightHand,
+    relic: hero.equipment.relic,
+    backpackCount: hero.equipment.backpack.length,
     roomId: hero.roomId,
     floorNumber: state.dungeon.floorByRoomId.get(hero.roomId) ?? 1,
     isActive: index === state.party.activeHeroIndex,

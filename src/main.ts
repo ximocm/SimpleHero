@@ -15,7 +15,7 @@ import {
 } from './systems/gameSystem.js';
 import { loadPersistedGameState, persistGameState } from './systems/persistenceSystem.js';
 import { inBounds, tileFromCanvas } from './utils/grid.js';
-import { createStarterPartyInventory } from './items/index.js';
+import { createStarterPartyInventory, ITEM_DEFINITIONS } from './items/index.js';
 
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 720;
@@ -25,6 +25,9 @@ const PARTY_GOLD = 0;
 
 const state = loadPersistedGameState() ?? createGameState(Date.now());
 const partyInventory = createStarterPartyInventory();
+const itemById = new Map<string, (typeof ITEM_DEFINITIONS)[number]>(
+  ITEM_DEFINITIONS.map((item) => [item.id, item]),
+);
 persistGameState(state);
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -60,30 +63,32 @@ function requireContext(canvasElement: HTMLCanvasElement): CanvasRenderingContex
 
 app.innerHTML = `
   <!-- App Layout -->
-  <div style="display:flex; gap:18px; align-items:flex-start; font-family: sans-serif; color:#cbd5e1;">
+  <div style="display:flex; gap:18px; align-items:flex-start; width:100%; font-family: sans-serif; color:#cbd5e1;">
     <!-- Left Sidebar: Character Panels -->
-    <div id="characterPanels" style="display:flex; flex-direction:column; gap:12px; width:220px;"></div>
+    <div id="characterPanels" style="display:flex; flex-direction:column; gap:10px; width:380px; flex:0 0 380px;"></div>
 
     <!-- Center: Dungeon View -->
-    <div>
-      <!-- Main Dungeon Canvas -->
-      <canvas id="gameCanvas" width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" style="background:transparent"></canvas>
-      <!-- Status Line -->
-      <div id="status" style="margin-top:8px; color:#cbd5e1; font-size:14px;"></div>
-      <!-- Controls Hint -->
-      <div style="margin-top:8px; color:#94a3b8; font-size:12px;">Mouse hover = A* preview | Click = move | 1/2/3 = active hero</div>
+    <div style="flex:1 1 auto; display:flex; justify-content:center;">
+      <div style="width:${CANVAS_WIDTH}px;">
+        <!-- Main Dungeon Canvas -->
+        <canvas id="gameCanvas" width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" style="background:transparent"></canvas>
+        <!-- Status Line -->
+        <div id="status" style="margin-top:8px; color:#cbd5e1; font-size:14px;"></div>
+        <!-- Controls Hint -->
+        <div style="margin-top:8px; color:#94a3b8; font-size:12px;">Mouse hover = A* preview | Click = move | 1/2/3 = active hero</div>
+      </div>
     </div>
 
     <!-- Right Sidebar: Map and Party Resources -->
-    <div style="display:flex; flex-direction:column; gap:12px; width:220px;">
+    <div style="display:flex; flex-direction:column; gap:12px; width:280px; flex:0 0 280px;">
       <!-- Minimap -->
       <canvas id="minimapCanvas" width="220" height="220" style="background:transparent"></canvas>
       <!-- Gold + Inventory Panel -->
-      <div style="min-height:320px; padding:12px; background:rgba(15,23,42,0.55);">
+      <div style="min-height:420px; padding:14px; background:rgba(15,23,42,0.55);">
         <!-- Gold Section -->
         <div id="goldValue" style="margin-bottom:12px;">gold: 0</div>
         <!-- Party Inventory Section -->
-        <div style="font-size:12px; color:#94a3b8; margin-bottom:8px;">party inventory</div>
+        <div style="font-size:14px; color:#94a3b8; margin-bottom:10px;">party inventory</div>
         <div id="partyInventoryList" style="display:flex; flex-direction:column; gap:6px;"></div>
       </div>
     </div>
@@ -100,6 +105,12 @@ const partyInventoryList = requireElement<HTMLDivElement>('#partyInventoryList')
 const ctx = requireContext(canvas);
 const minimapCtx = requireContext(minimapCanvas);
 
+type EquipSlot = 'armor' | 'leftHand' | 'rightHand' | 'relic' | 'backpack';
+type DragPayload =
+  | { source: 'inventory'; itemId: string }
+  | { source: 'slot'; itemId: string; heroIndex: number; slot: Exclude<EquipSlot, 'backpack'> }
+  | { source: 'backpack'; itemId: string; heroIndex: number; backpackIndex: number };
+
 characterPanels.addEventListener('click', (event) => {
   const target = event.target as HTMLElement | null;
   if (!target) return;
@@ -113,6 +124,92 @@ characterPanels.addEventListener('click', (event) => {
   setActiveHeroIndex(state, index);
   persistGameState(state);
   renderCharacterPanels();
+});
+
+characterPanels.addEventListener('dragstart', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+  const draggable = target.closest<HTMLElement>('[data-drag-source]');
+  if (!draggable) return;
+
+  const source = draggable.dataset.dragSource;
+  if (source === 'slot') {
+    const heroIndex = Number(draggable.dataset.heroIndex);
+    const slot = draggable.dataset.slot as Exclude<EquipSlot, 'backpack'> | undefined;
+    const itemId = draggable.dataset.itemId;
+    if (!Number.isInteger(heroIndex) || !slot || !itemId) return;
+    const payload: DragPayload = { source: 'slot', heroIndex, slot, itemId };
+    event.dataTransfer?.setData('application/x-simplehero-item', JSON.stringify(payload));
+    event.dataTransfer?.setData('text/plain', itemId);
+    return;
+  }
+
+  if (source === 'backpack') {
+    const heroIndex = Number(draggable.dataset.heroIndex);
+    const backpackIndex = Number(draggable.dataset.backpackIndex);
+    const itemId = draggable.dataset.itemId;
+    if (!Number.isInteger(heroIndex) || !Number.isInteger(backpackIndex) || !itemId) return;
+    const payload: DragPayload = { source: 'backpack', heroIndex, backpackIndex, itemId };
+    event.dataTransfer?.setData('application/x-simplehero-item', JSON.stringify(payload));
+    event.dataTransfer?.setData('text/plain', itemId);
+  }
+});
+
+characterPanels.addEventListener('dragover', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+  if (!target.closest<HTMLElement>('[data-drop-slot]')) return;
+  event.preventDefault();
+});
+
+characterPanels.addEventListener('drop', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+  const dropZone = target.closest<HTMLElement>('[data-drop-slot]');
+  if (!dropZone) return;
+  event.preventDefault();
+
+  const payload = readDragPayload(event);
+  if (!payload) return;
+
+  const heroIndex = Number(dropZone.dataset.heroIndex);
+  const slot = dropZone.dataset.dropSlot as EquipSlot | undefined;
+  if (!Number.isInteger(heroIndex) || !slot) return;
+
+  if (!movePayloadToSlot(payload, heroIndex, slot)) return;
+  persistGameState(state);
+  renderCharacterPanels();
+  renderPartyInventory();
+});
+
+partyInventoryList.addEventListener('dragstart', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+  const draggable = target.closest<HTMLElement>('[data-drag-source="inventory"]');
+  if (!draggable) return;
+  const itemId = draggable.dataset.itemId;
+  if (!itemId) return;
+
+  const payload: DragPayload = { source: 'inventory', itemId };
+  event.dataTransfer?.setData('application/x-simplehero-item', JSON.stringify(payload));
+  event.dataTransfer?.setData('text/plain', itemId);
+});
+
+partyInventoryList.addEventListener('dragover', (event) => {
+  event.preventDefault();
+});
+
+partyInventoryList.addEventListener('drop', (event) => {
+  event.preventDefault();
+  const payload = readDragPayload(event);
+  if (!payload) return;
+
+  const removed = removeFromSource(payload);
+  if (!removed) return;
+  addInventory(payload.itemId);
+  persistGameState(state);
+  renderCharacterPanels();
+  renderPartyInventory();
 });
 
 /**
@@ -195,6 +292,7 @@ window.addEventListener('keydown', (event) => {
   if (event.key === '3') setActiveHeroIndex(state, 2);
   if (event.key === '1' || event.key === '2' || event.key === '3') {
     persistGameState(state);
+    renderCharacterPanels();
   }
 });
 
@@ -266,8 +364,6 @@ function draw(): void {
 
   drawHud();
   drawMinimap();
-  renderCharacterPanels();
-  renderPartyInventory();
 }
 
 /**
@@ -348,19 +444,33 @@ function renderCharacterPanels(): void {
       return `
         <div
           data-hero-index="${index}"
-          style="cursor:pointer; border:1px solid ${border}; min-height:126px; padding:12px; background:rgba(15,23,42,0.55);"
+          style="cursor:pointer; border:1px solid ${border}; min-height:118px; padding:12px; background:rgba(15,23,42,0.55);"
         >
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <div style="font-size:14px; font-weight:600;">${hero.classLetter} · ${hero.className}</div>
-            <div style="font-size:11px; color:${badgeColor};">${badgeLabel}</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <div style="font-size:15px; font-weight:600;">${hero.classLetter} · ${hero.className}</div>
+            <div style="font-size:12px; color:${badgeColor};">${badgeLabel}</div>
           </div>
           <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">${hero.raceName}</div>
           <div style="font-size:12px; margin-bottom:4px;">HP ${hero.hp}/${hero.maxHp}</div>
-          <div style="height:6px; background:rgba(148,163,184,0.25); margin-bottom:8px;">
+          <div style="height:8px; background:rgba(148,163,184,0.25); margin-bottom:8px;">
             <div style="width:${hpPercent}%; height:100%; background:#22c55e;"></div>
           </div>
-          <div style="font-size:12px; color:#cbd5e1;">Body ${hero.body} · Mind ${hero.mind}</div>
-          <div style="font-size:11px; color:#94a3b8; margin-top:6px;">Floor ${hero.floorNumber} · Room ${hero.roomId}</div>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;">Body ${hero.body} · Mind ${hero.mind}</div>
+          <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
+            ${renderEquipSlot(index, 'armor', 'A', hero.armor)}
+            ${renderEquipSlot(index, 'leftHand', 'L', hero.leftHand)}
+            ${renderEquipSlot(index, 'rightHand', 'R', hero.rightHand)}
+            ${renderEquipSlot(index, 'relic', 'Rel', hero.relic)}
+          </div>
+          <div
+            data-drop-slot="backpack"
+            data-hero-index="${index}"
+            style="min-height:30px; border:1px dashed rgba(148,163,184,0.4); padding:6px; font-size:11px; color:#cbd5e1; margin-bottom:2px;"
+          >
+            <div style="color:#94a3b8; margin-bottom:4px;">Backpack (${hero.backpackCount})</div>
+            ${renderBackpackItems(index)}
+          </div>
+          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Floor ${hero.floorNumber} · Room ${hero.roomId}</div>
         </div>
       `;
     })
@@ -376,20 +486,261 @@ function renderPartyInventory(): void {
   partyInventoryList.innerHTML = partyInventory
     .map(
       (entry) => `
-        <div style="display:flex; align-items:center; gap:8px; font-size:12px;">
+        <div
+          data-drag-source="inventory"
+          data-item-id="${entry.itemId}"
+          draggable="true"
+          title="${escapeAttr(getItemTooltip(entry.itemId))}"
+          style="display:flex; align-items:center; gap:10px; font-size:14px; cursor:grab;"
+        >
           <img
             src="/${entry.file}"
             alt="${entry.name}"
-            width="20"
-            height="20"
-            style="image-rendering:pixelated; background:rgba(148,163,184,0.18);"
+            width="34"
+            height="34"
+            style="image-rendering:pixelated; background:rgba(148,163,184,0.18); border:1px solid rgba(148,163,184,0.35);"
           />
           <span style="flex:1;">${entry.name}</span>
-          <span style="color:#94a3b8;">x${entry.quantity}</span>
         </div>
       `,
     )
     .join('');
+}
+
+function renderEquipSlot(
+  heroIndex: number,
+  slot: Exclude<EquipSlot, 'backpack'>,
+  label: string,
+  itemId: string | null,
+): string {
+  const item = itemId ? itemById.get(itemId) : null;
+  const dragAttrs = itemId
+    ? `data-drag-source="slot" data-item-id="${itemId}" data-hero-index="${heroIndex}" data-slot="${slot}" draggable="true" style="cursor:grab; display:inline-block;"`
+    : 'style="display:inline-block;"';
+  const slotContent = itemId && item
+    ? `<img src="/${item.file}" alt="${item.name}" width="22" height="22" title="${escapeAttr(
+        getItemTooltip(itemId),
+      )}" style="image-rendering:pixelated; border:1px solid rgba(148,163,184,0.35); background:rgba(148,163,184,0.14);" />`
+    : `<span style="font-size:11px; color:#64748b;">-</span>`;
+
+  return `
+    <div
+      data-drop-slot="${slot}"
+      data-hero-index="${heroIndex}"
+      style="min-height:30px; border:1px dashed rgba(148,163,184,0.4); padding:5px; font-size:10px; color:#94a3b8;"
+    >
+      <div>${label}</div>
+      <div ${dragAttrs}>${slotContent}</div>
+    </div>
+  `;
+}
+
+function renderBackpackItems(heroIndex: number): string {
+  const hero = state.party.heroes[heroIndex];
+  if (!hero || hero.equipment.backpack.length === 0) {
+    return '<span style="color:#64748b;">Drop item here</span>';
+  }
+
+  return hero.equipment.backpack
+    .map((itemId, backpackIndex) => {
+      const item = itemById.get(itemId);
+      if (!item) return '';
+      return `<span data-drag-source="backpack" data-item-id="${itemId}" data-hero-index="${heroIndex}" data-backpack-index="${backpackIndex}" draggable="true" title="${escapeAttr(
+        getItemTooltip(itemId),
+      )}" style="display:inline-block; margin-right:6px; cursor:grab;"><img src="/${
+        item.file
+      }" alt="${item.name}" width="20" height="20" style="image-rendering:pixelated; border:1px solid rgba(148,163,184,0.35); background:rgba(148,163,184,0.14);" /></span>`;
+    })
+    .join('');
+}
+
+function readDragPayload(event: DragEvent): DragPayload | null {
+  const raw = event.dataTransfer?.getData('application/x-simplehero-item');
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as DragPayload;
+  } catch {
+    return null;
+  }
+}
+
+function movePayloadToSlot(payload: DragPayload, heroIndex: number, slot: EquipSlot): boolean {
+  const item = itemById.get(payload.itemId);
+  if (!item) return false;
+  if (payload.source === 'slot' && payload.heroIndex === heroIndex && payload.slot === slot) return true;
+  if (!canEquipItemToSlot(payload.itemId, slot)) return false;
+
+  const removed = removeFromSource(payload);
+  if (!removed) return false;
+
+  const hero = state.party.heroes[heroIndex];
+  if (!hero) {
+    returnToSource(payload);
+    return false;
+  }
+
+  if (slot === 'backpack') {
+    hero.equipment.backpack.push(payload.itemId);
+    return true;
+  }
+
+  if (slot === 'leftHand' || slot === 'rightHand') {
+    equipInHandSlot(hero, slot, payload.itemId);
+    return true;
+  }
+
+  const previous = hero.equipment[slot] as string | null;
+  if (previous) addInventory(previous);
+  hero.equipment[slot] = payload.itemId;
+  return true;
+}
+
+function removeFromSource(payload: DragPayload): boolean {
+  if (payload.source === 'inventory') {
+    return removeInventory(payload.itemId);
+  }
+
+  const hero = state.party.heroes[payload.heroIndex];
+  if (!hero) return false;
+
+  if (payload.source === 'slot') {
+    if (hero.equipment[payload.slot] !== payload.itemId) return false;
+    hero.equipment[payload.slot] = null;
+    if (
+      (payload.slot === 'leftHand' || payload.slot === 'rightHand') &&
+      getHandsRequired(payload.itemId) === 2
+    ) {
+      const other = payload.slot === 'leftHand' ? 'rightHand' : 'leftHand';
+      if (hero.equipment[other] === payload.itemId) {
+        hero.equipment[other] = null;
+      }
+    }
+    return true;
+  }
+
+  if (payload.backpackIndex < 0 || payload.backpackIndex >= hero.equipment.backpack.length) return false;
+  if (hero.equipment.backpack[payload.backpackIndex] !== payload.itemId) return false;
+  hero.equipment.backpack.splice(payload.backpackIndex, 1);
+  return true;
+}
+
+function returnToSource(payload: DragPayload): void {
+  if (payload.source === 'inventory') {
+    addInventory(payload.itemId);
+    return;
+  }
+
+  const hero = state.party.heroes[payload.heroIndex];
+  if (!hero) return;
+
+  if (payload.source === 'slot') {
+    hero.equipment[payload.slot] = payload.itemId;
+    return;
+  }
+
+  hero.equipment.backpack.splice(payload.backpackIndex, 0, payload.itemId);
+}
+
+function addInventory(itemId: string): void {
+  const item = itemById.get(itemId);
+  if (!item) return;
+  partyInventory.push({
+    itemId: item.id,
+    name: item.name,
+    file: item.file,
+    category: item.category,
+  });
+}
+
+function removeInventory(itemId: string): boolean {
+  const index = partyInventory.findIndex((item) => item.itemId === itemId);
+  if (index < 0) return false;
+  partyInventory.splice(index, 1);
+  return true;
+}
+
+function canEquipItemToSlot(itemId: string, slot: EquipSlot): boolean {
+  const item = itemById.get(itemId);
+  if (!item) return false;
+
+  if (slot === 'backpack') return true;
+  if (slot === 'armor') return item.category === 'armor' && item.id !== 'shield';
+  if (slot === 'leftHand' || slot === 'rightHand') {
+    return item.category === 'weapon' || item.id === 'shield';
+  }
+  if (slot === 'relic') return item.category === 'consumable';
+  return false;
+}
+
+function equipInHandSlot(
+  hero: (typeof state.party.heroes)[number],
+  slot: 'leftHand' | 'rightHand',
+  itemId: string,
+): void {
+  const handsRequired = getHandsRequired(itemId);
+  const other = slot === 'leftHand' ? 'rightHand' : 'leftHand';
+
+  if (handsRequired === 2) {
+    clearHandSlot(hero, 'leftHand', itemId);
+    clearHandSlot(hero, 'rightHand', itemId);
+    hero.equipment.leftHand = itemId;
+    hero.equipment.rightHand = itemId;
+    return;
+  }
+
+  const otherItem = hero.equipment[other];
+  if (otherItem && getHandsRequired(otherItem) === 2) {
+    clearHandSlot(hero, 'leftHand');
+    clearHandSlot(hero, 'rightHand');
+  }
+
+  clearHandSlot(hero, slot);
+  hero.equipment[slot] = itemId;
+}
+
+function clearHandSlot(
+  hero: (typeof state.party.heroes)[number],
+  slot: 'leftHand' | 'rightHand',
+  ignoreItemId?: string,
+): void {
+  const current = hero.equipment[slot];
+  if (!current) return;
+  hero.equipment[slot] = null;
+  if (ignoreItemId && current === ignoreItemId) return;
+  addInventory(current);
+}
+
+function getHandsRequired(itemId: string): number {
+  const item = itemById.get(itemId);
+  if (!item) return 1;
+  if (item.category === 'weapon') return item.handsRequired;
+  if (item.id === 'shield') return item.handsRequired ?? 1;
+  return 0;
+}
+
+function getItemTooltip(itemId: string): string {
+  const item = itemById.get(itemId);
+  if (!item) return itemId;
+
+  if (item.category === 'weapon') {
+    return `${item.name}\nRange: ${item.range}\nAttack dice: ${item.attackDice}\nDamage: ${item.damage}\nHands: ${item.handsRequired}`;
+  }
+
+  if (item.category === 'armor') {
+    const hands = item.handsRequired ? `\nHands: ${item.handsRequired}` : '';
+    return `${item.name}\nDefense dice bonus: ${item.defenseDiceBonus}\nMovement modifier: ${item.movementModifier}${hands}`;
+  }
+
+  return `${item.name}\nEffect: ${item.effect}\nValue: ${item.value}`;
+}
+
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 /**
@@ -442,6 +793,8 @@ function tick(): void {
   const moved = stepMovement(state);
   if (moved) {
     persistGameState(state);
+    renderCharacterPanels();
+    renderPartyInventory();
   }
   draw();
   requestAnimationFrame(tick);

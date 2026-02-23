@@ -5,7 +5,6 @@ export interface InventoryEntry {
   name: string;
   file: string;
   category: 'weapon' | 'armor' | 'consumable';
-  quantity: number;
 }
 
 /**
@@ -18,6 +17,5 @@ export function createStarterPartyInventory(): InventoryEntry[] {
     name: item.name,
     file: item.file,
     category: item.category,
-    quantity: 1,
   }));
 }

@@ -39,6 +39,13 @@ export function createHero(
     maxHp: raceDef.maxHp,
     body: raceDef.body,
     mind: raceDef.mind,
+    equipment: {
+      armor: null,
+      leftHand: null,
+      rightHand: null,
+      relic: null,
+      backpack: [],
+    },
     roomId,
     tile: { ...spawnTile },
     facing: 'S',

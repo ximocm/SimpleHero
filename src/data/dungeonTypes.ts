@@ -32,6 +32,13 @@ export interface HeroState {
   maxHp: number;
   body: number;
   mind: number;
+  equipment: {
+    armor: string | null;
+    leftHand: string | null;
+    rightHand: string | null;
+    relic: string | null;
+    backpack: string[];
+  };
   roomId: string;
   tile: Coord;
   facing: Direction;

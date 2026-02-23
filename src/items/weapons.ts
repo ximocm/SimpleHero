@@ -8,10 +8,10 @@ export interface WeaponDefinition {
   id: WeaponId;
   name: string;
   file: string;
+  handsRequired: 1 | 2;
   range: number;
   attackDice: number;
   damage: number;
-  twoHanded?: boolean;
 }
 
 export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
@@ -19,6 +19,7 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     id: 'short-sword',
     name: 'Short Sword',
     file: 'assets/images/items/short-sword.svg',
+    handsRequired: 1,
     range: 1,
     attackDice: 1,
     damage: 3,
@@ -27,15 +28,16 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     id: 'two-handed-sword',
     name: 'Two-Handed Sword',
     file: 'assets/images/items/two-handed-sword.svg',
+    handsRequired: 2,
     range: 1,
     attackDice: 2,
     damage: 4,
-    twoHanded: true,
   },
   bow: {
     id: 'bow',
     name: 'Bow',
     file: 'assets/images/items/bow.svg',
+    handsRequired: 2,
     range: 4,
     attackDice: 1,
     damage: 3,
@@ -44,6 +46,7 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     id: 'staff',
     name: 'Staff',
     file: 'assets/images/items/staff.svg',
+    handsRequired: 2,
     range: 4,
     attackDice: 1,
     damage: 2,

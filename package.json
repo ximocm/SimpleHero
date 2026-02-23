@@ -1,0 +1,14 @@
+{
+  "name": "simplehero",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SimpleHero web prototype",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "serve": "python3 scripts/dev_server.py",
+    "dev": "npm run build && npm run serve"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

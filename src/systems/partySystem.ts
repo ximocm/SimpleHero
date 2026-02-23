@@ -1,19 +1,5 @@
-import type { Coord, HeroClassName, HeroRaceName, HeroState, PartyState } from '../data/dungeonTypes.js';
-
-interface HeroProfile {
-  classLetter: 'W' | 'R' | 'M';
-  className: HeroClassName;
-  raceName: HeroRaceName;
-  maxHp: number;
-  body: number;
-  mind: number;
-}
-
-const HERO_PROFILES: HeroProfile[] = [
-  { classLetter: 'W', className: 'Warrior', raceName: 'Orc', maxHp: 12, body: 4, mind: 2 },
-  { classLetter: 'R', className: 'Ranger', raceName: 'Elf', maxHp: 8, body: 2, mind: 4 },
-  { classLetter: 'M', className: 'Mage', raceName: 'Human', maxHp: 10, body: 3, mind: 3 },
-];
+import type { Coord, HeroState, PartyState } from '../data/dungeonTypes.js';
+import { createDefaultHeroes } from '../heroes/heroSystem.js';
 
 /**
  * Builds the party and places heroes on provided starting tiles.
@@ -22,19 +8,7 @@ const HERO_PROFILES: HeroProfile[] = [
  * @returns Initialized party state.
  */
 export function createParty(roomId: string, startTiles: readonly Coord[]): PartyState {
-  const heroes: HeroState[] = HERO_PROFILES.map((profile, index) => ({
-    id: `hero-${index}`,
-    classLetter: profile.classLetter,
-    className: profile.className,
-    raceName: profile.raceName,
-    hp: profile.maxHp,
-    maxHp: profile.maxHp,
-    body: profile.body,
-    mind: profile.mind,
-    roomId,
-    tile: { ...startTiles[index] },
-    facing: 'S',
-  }));
+  const heroes: HeroState[] = createDefaultHeroes(roomId, startTiles);
 
   return {
     heroes,

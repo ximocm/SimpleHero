@@ -19,6 +19,21 @@ export interface GameState {
   readyByHeroId: Map<string, Direction>;
 }
 
+export interface HeroPanelView {
+  id: string;
+  classLetter: 'W' | 'R' | 'M';
+  className: string;
+  raceName: string;
+  hp: number;
+  maxHp: number;
+  body: number;
+  mind: number;
+  roomId: string;
+  floorNumber: number;
+  isActive: boolean;
+  isReadyAtExit: boolean;
+}
+
 /**
  * Creates the full game state from a seed.
  * @param seed Run seed.
@@ -321,4 +336,26 @@ export function getCurrentRoomCoordId(state: GameState): string {
  */
 export function getCurrentFloorNumber(state: GameState): number {
   return state.dungeon.floorByRoomId.get(state.dungeon.currentRoomId) ?? 1;
+}
+
+/**
+ * Returns panel-ready hero view data for UI rendering.
+ * @param state Game state.
+ * @returns Ordered hero view models for panel display.
+ */
+export function getHeroPanelViews(state: GameState): HeroPanelView[] {
+  return state.party.heroes.map((hero, index) => ({
+    id: hero.id,
+    classLetter: hero.classLetter,
+    className: hero.className,
+    raceName: hero.raceName,
+    hp: hero.hp,
+    maxHp: hero.maxHp,
+    body: hero.body,
+    mind: hero.mind,
+    roomId: hero.roomId,
+    floorNumber: state.dungeon.floorByRoomId.get(hero.roomId) ?? 1,
+    isActive: index === state.party.activeHeroIndex,
+    isReadyAtExit: state.readyByHeroId.has(hero.id),
+  }));
 }

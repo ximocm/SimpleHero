@@ -1,6 +1,8 @@
 import type { TileType } from './tileTypes.js';
 
 export type Direction = 'N' | 'E' | 'S' | 'W';
+export type HeroClassName = 'Warrior' | 'Ranger' | 'Mage';
+export type HeroRaceName = 'Human' | 'Elf' | 'Orc';
 
 export interface Coord {
   x: number;
@@ -24,6 +26,12 @@ export interface RoomData {
 export interface HeroState {
   id: string;
   classLetter: 'W' | 'R' | 'M';
+  className: HeroClassName;
+  raceName: HeroRaceName;
+  hp: number;
+  maxHp: number;
+  body: number;
+  mind: number;
   roomId: string;
   tile: Coord;
   facing: Direction;

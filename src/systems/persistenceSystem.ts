@@ -6,11 +6,14 @@ import type {
   HeroState,
   RoomData,
 } from '../data/dungeonTypes.js';
+import type { InventoryEntry } from '../items/inventory.js';
+import { ITEM_DEFINITIONS } from '../items/items.js';
 import { createGameState, type GameState } from './gameSystem.js';
 import { inBounds } from '../utils/grid.js';
 import { isWalkable, TileType } from '../data/tileTypes.js';
 
 const SAVE_KEY = 'simplehero.autosave.v1';
+const INVENTORY_SAVE_KEY = 'simplehero.inventory.v1';
 const HERO_COUNT = 3;
 
 interface PersistedDungeonState {
@@ -105,6 +108,32 @@ export function persistGameState(state: GameState): void {
  */
 export function clearPersistedGameState(): void {
   localStorage.removeItem(SAVE_KEY);
+}
+
+/**
+ * Loads party inventory entries from localStorage.
+ * @returns Restored inventory entries, or `null` when none/invalid.
+ */
+export function loadPersistedPartyInventory(): InventoryEntry[] | null {
+  const raw = localStorage.getItem(INVENTORY_SAVE_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return sanitizeInventory(parsed);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persists current party inventory to localStorage.
+ * @param inventory Inventory entries to persist.
+ * @returns Nothing.
+ */
+export function persistPartyInventory(inventory: readonly InventoryEntry[]): void {
+  localStorage.setItem(INVENTORY_SAVE_KEY, JSON.stringify(inventory));
 }
 
 function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
@@ -246,4 +275,28 @@ function sanitizeEquipment(
       ? v.backpack.filter((item): item is string => typeof item === 'string')
       : [],
   };
+}
+
+function sanitizeInventory(value: unknown[]): InventoryEntry[] {
+  const canonicalById = new Map<string, (typeof ITEM_DEFINITIONS)[number]>(
+    ITEM_DEFINITIONS.map((item) => [item.id, item]),
+  );
+  const sanitized: InventoryEntry[] = [];
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const itemId = (entry as { itemId?: unknown }).itemId;
+    if (typeof itemId !== 'string') continue;
+    const canonical = canonicalById.get(itemId);
+    if (!canonical) continue;
+
+    sanitized.push({
+      itemId: canonical.id,
+      name: canonical.name,
+      file: canonical.file,
+      category: canonical.category,
+    });
+  }
+
+  return sanitized;
 }

@@ -13,7 +13,12 @@ import {
   stepMovement,
   updateHoverPath,
 } from './systems/gameSystem.js';
-import { loadPersistedGameState, persistGameState } from './systems/persistenceSystem.js';
+import {
+  loadPersistedGameState,
+  loadPersistedPartyInventory,
+  persistGameState,
+  persistPartyInventory,
+} from './systems/persistenceSystem.js';
 import { inBounds, tileFromCanvas } from './utils/grid.js';
 import { createStarterPartyInventory, ITEM_DEFINITIONS } from './items/index.js';
 
@@ -24,11 +29,11 @@ const SHOW_FULL_DUNGEON_MAP = true;
 const PARTY_GOLD = 0;
 
 const state = loadPersistedGameState() ?? createGameState(Date.now());
-const partyInventory = createStarterPartyInventory();
+const partyInventory = loadPersistedPartyInventory() ?? createStarterPartyInventory();
 const itemById = new Map<string, (typeof ITEM_DEFINITIONS)[number]>(
   ITEM_DEFINITIONS.map((item) => [item.id, item]),
 );
-persistGameState(state);
+persistAll();
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -122,7 +127,7 @@ characterPanels.addEventListener('click', (event) => {
   if (!Number.isInteger(index)) return;
 
   setActiveHeroIndex(state, index);
-  persistGameState(state);
+  persistAll();
   renderCharacterPanels();
 });
 
@@ -177,7 +182,7 @@ characterPanels.addEventListener('drop', (event) => {
   if (!Number.isInteger(heroIndex) || !slot) return;
 
   if (!movePayloadToSlot(payload, heroIndex, slot)) return;
-  persistGameState(state);
+  persistAll();
   renderCharacterPanels();
   renderPartyInventory();
 });
@@ -207,7 +212,7 @@ partyInventoryList.addEventListener('drop', (event) => {
   const removed = removeFromSource(payload);
   if (!removed) return;
   addInventory(payload.itemId);
-  persistGameState(state);
+  persistAll();
   renderCharacterPanels();
   renderPartyInventory();
 });
@@ -283,7 +288,7 @@ canvas.addEventListener('click', (event) => {
 
   updateHoverPath(state, target);
   commitMoveFromHover(state);
-  persistGameState(state);
+  persistAll();
 });
 
 window.addEventListener('keydown', (event) => {
@@ -291,7 +296,7 @@ window.addEventListener('keydown', (event) => {
   if (event.key === '2') setActiveHeroIndex(state, 1);
   if (event.key === '3') setActiveHeroIndex(state, 2);
   if (event.key === '1' || event.key === '2' || event.key === '3') {
-    persistGameState(state);
+    persistAll();
     renderCharacterPanels();
   }
 });
@@ -650,12 +655,14 @@ function addInventory(itemId: string): void {
     file: item.file,
     category: item.category,
   });
+  persistPartyInventory(partyInventory);
 }
 
 function removeInventory(itemId: string): boolean {
   const index = partyInventory.findIndex((item) => item.itemId === itemId);
   if (index < 0) return false;
   partyInventory.splice(index, 1);
+  persistPartyInventory(partyInventory);
   return true;
 }
 
@@ -792,7 +799,7 @@ function facingTriangle(
 function tick(): void {
   const moved = stepMovement(state);
   if (moved) {
-    persistGameState(state);
+    persistAll();
     renderCharacterPanels();
     renderPartyInventory();
   }
@@ -801,13 +808,22 @@ function tick(): void {
 }
 
 window.setInterval(() => {
-  persistGameState(state);
+  persistAll();
 }, 3000);
 
 window.addEventListener('beforeunload', () => {
-  persistGameState(state);
+  persistAll();
 });
 
 renderCharacterPanels();
 renderPartyInventory();
 tick();
+
+/**
+ * Persists both gameplay and party inventory snapshot.
+ * @returns Nothing.
+ */
+function persistAll(): void {
+  persistGameState(state);
+  persistPartyInventory(partyInventory);
+}

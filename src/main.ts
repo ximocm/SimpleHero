@@ -15,13 +15,16 @@ import {
 } from './systems/gameSystem.js';
 import { loadPersistedGameState, persistGameState } from './systems/persistenceSystem.js';
 import { inBounds, tileFromCanvas } from './utils/grid.js';
+import { createStarterPartyInventory } from './items/index.js';
 
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 720;
 const HUD_HEIGHT = 64;
 const SHOW_FULL_DUNGEON_MAP = true;
+const PARTY_GOLD = 0;
 
 const state = loadPersistedGameState() ?? createGameState(Date.now());
+const partyInventory = createStarterPartyInventory();
 persistGameState(state);
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -78,9 +81,10 @@ app.innerHTML = `
       <!-- Gold + Inventory Panel -->
       <div style="min-height:320px; padding:12px; background:rgba(15,23,42,0.55);">
         <!-- Gold Section -->
-        <div style="margin-bottom:12px;">gold</div>
+        <div id="goldValue" style="margin-bottom:12px;">gold: 0</div>
         <!-- Party Inventory Section -->
-        <div>party inventory</div>
+        <div style="font-size:12px; color:#94a3b8; margin-bottom:8px;">party inventory</div>
+        <div id="partyInventoryList" style="display:flex; flex-direction:column; gap:6px;"></div>
       </div>
     </div>
   </div>
@@ -90,6 +94,8 @@ const canvas = requireElement<HTMLCanvasElement>('#gameCanvas');
 const minimapCanvas = requireElement<HTMLCanvasElement>('#minimapCanvas');
 const status = requireElement<HTMLDivElement>('#status');
 const characterPanels = requireElement<HTMLDivElement>('#characterPanels');
+const goldValue = requireElement<HTMLDivElement>('#goldValue');
+const partyInventoryList = requireElement<HTMLDivElement>('#partyInventoryList');
 
 const ctx = requireContext(canvas);
 const minimapCtx = requireContext(minimapCanvas);
@@ -261,6 +267,7 @@ function draw(): void {
   drawHud();
   drawMinimap();
   renderCharacterPanels();
+  renderPartyInventory();
 }
 
 /**
@@ -361,6 +368,31 @@ function renderCharacterPanels(): void {
 }
 
 /**
+ * Renders party inventory list with one entry per item.
+ * @returns Nothing.
+ */
+function renderPartyInventory(): void {
+  goldValue.textContent = `gold: ${PARTY_GOLD}`;
+  partyInventoryList.innerHTML = partyInventory
+    .map(
+      (entry) => `
+        <div style="display:flex; align-items:center; gap:8px; font-size:12px;">
+          <img
+            src="/${entry.file}"
+            alt="${entry.name}"
+            width="20"
+            height="20"
+            style="image-rendering:pixelated; background:rgba(148,163,184,0.18);"
+          />
+          <span style="flex:1;">${entry.name}</span>
+          <span style="color:#94a3b8;">x${entry.quantity}</span>
+        </div>
+      `,
+    )
+    .join('');
+}
+
+/**
  * Computes triangle vertices used as hero facing indicator.
  * @param cx Hero center x.
  * @param cy Hero center y.
@@ -424,4 +456,5 @@ window.addEventListener('beforeunload', () => {
 });
 
 renderCharacterPanels();
+renderPartyInventory();
 tick();

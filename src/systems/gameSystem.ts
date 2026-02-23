@@ -54,21 +54,34 @@ export function setActiveHeroIndex(state: GameState, index: number): void {
 export function updateHoverPath(state: GameState, target: Coord): void {
   const room = getCurrentRoom(state);
   const hero = getActiveHero(state.party);
-  state.hoverPath = findPathAStar(hero.tile, target, (coord) => canWalkTile(room, coord));
+  if (state.readyByHeroId.has(hero.id)) {
+    state.hoverPath = [];
+    return;
+  }
+  state.hoverPath = findPathAStar(hero.tile, target, (coord) =>
+    canWalkTile(room, coord) && !isTileOccupiedByOtherHero(state, room.id, coord, hero.id),
+  );
 }
 
 export function commitMoveFromHover(state: GameState): void {
+  const hero = getActiveHero(state.party);
+  if (state.readyByHeroId.has(hero.id)) return;
   if (state.hoverPath.length < 2) return;
   state.movingPath = [...state.hoverPath];
 }
 
 export function stepMovement(state: GameState): boolean {
   const hero = getActiveHero(state.party);
+  if (state.readyByHeroId.has(hero.id)) return false;
   if (state.movingPath.length < 2) return false;
 
   state.movingPath.shift();
   const next = state.movingPath[0];
   if (!next) return false;
+  if (isTileOccupiedByOtherHero(state, hero.roomId, next, hero.id)) {
+    state.movingPath = [];
+    return false;
+  }
 
   updateFacing(hero.tile, next, hero);
   hero.tile = { ...next };
@@ -179,6 +192,22 @@ function getClosestWalkableTiles(room: RoomData, origin: Coord, count: number): 
 
 function manhattanDistance(a: Coord, b: Coord): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+function isTileOccupiedByOtherHero(
+  state: GameState,
+  roomId: string,
+  coord: Coord,
+  currentHeroId: string,
+): boolean {
+  return state.party.heroes.some(
+    (hero) =>
+      hero.id !== currentHeroId &&
+      !state.readyByHeroId.has(hero.id) &&
+      hero.roomId === roomId &&
+      hero.tile.x === coord.x &&
+      hero.tile.y === coord.y,
+  );
 }
 
 export function getTileAt(room: RoomData, coord: Coord): TileType {

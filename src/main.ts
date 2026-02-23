@@ -162,6 +162,8 @@ function draw(): void {
   }
 
   state.party.heroes.forEach((hero, index) => {
+    if (state.readyByHeroId.has(hero.id)) return;
+
     const cx = offset.x + hero.tile.x * tileSize + tileSize / 2;
     const cy = offset.y + hero.tile.y * tileSize + tileSize / 2;
     const radius = tileSize * 0.3;

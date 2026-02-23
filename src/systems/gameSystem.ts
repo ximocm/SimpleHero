@@ -1,15 +1,15 @@
-import { Coord, Direction, DungeonState, PartyState, RoomData } from '../data/dungeonTypes';
-import { isWalkable, TileType } from '../data/tileTypes';
+import type { Coord, Direction, DungeonState, PartyState, RoomData } from '../data/dungeonTypes.js';
+import { isWalkable, TileType } from '../data/tileTypes.js';
 import {
   moveRoomCoord,
   oppositeDirection,
   roomIdFromCoord,
   sameCoord,
-} from '../utils/coord';
-import { inBounds } from '../utils/grid';
-import { findPathAStar } from '../utils/pathfinding';
-import { createDungeonState, getOrCreateRoom } from './dungeonStateSystem';
-import { createParty, getActiveHero, setActiveHero } from './partySystem';
+} from '../utils/coord.js';
+import { inBounds } from '../utils/grid.js';
+import { findPathAStar } from '../utils/pathfinding.js';
+import { createDungeonState, getOrCreateRoom } from './dungeonStateSystem.js';
+import { createParty, getActiveHero, setActiveHero } from './partySystem.js';
 
 export interface GameState {
   dungeon: DungeonState;
@@ -142,4 +142,3 @@ export function getTileAt(room: RoomData, coord: Coord): TileType {
 export function getCurrentRoomCoordId(state: GameState): string {
   return roomIdFromCoord(getCurrentRoom(state).coord);
 }
-

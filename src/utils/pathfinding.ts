@@ -1,5 +1,5 @@
-import { Coord } from '../data/dungeonTypes';
-import { coordKey, neighbors4 } from './grid';
+import type { Coord } from '../data/dungeonTypes.js';
+import { coordKey, neighbors4 } from './grid.js';
 
 interface Node {
   coord: Coord;
@@ -79,4 +79,3 @@ function reconstruct(goal: Coord, cameFrom: Map<string, string>): Coord[] {
 
   return path.reverse();
 }
-

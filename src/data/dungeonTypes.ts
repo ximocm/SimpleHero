@@ -1,4 +1,4 @@
-import { TileType } from './tileTypes';
+import type { TileType } from './tileTypes.js';
 
 export type Direction = 'N' | 'E' | 'S' | 'W';
 
@@ -41,4 +41,3 @@ export interface DungeonState {
   discoveredRoomIds: Set<string>;
   currentRoomId: string;
 }
-

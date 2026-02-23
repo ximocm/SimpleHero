@@ -1,4 +1,4 @@
-import { Coord, Direction, RoomCoord } from '../data/dungeonTypes';
+import type { Coord, Direction, RoomCoord } from '../data/dungeonTypes.js';
 
 export function roomIdFromCoord(coord: RoomCoord): string {
   return `${coord.x},${coord.y}`;
@@ -26,4 +26,3 @@ export function moveRoomCoord(coord: RoomCoord, direction: Direction): RoomCoord
   const delta = directionToDelta(direction);
   return { x: coord.x + delta.x, y: coord.y + delta.y };
 }
-

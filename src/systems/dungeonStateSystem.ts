@@ -1,6 +1,6 @@
-import { DungeonState, RoomCoord, RoomData } from '../data/dungeonTypes';
-import { roomIdFromCoord } from '../utils/coord';
-import { createRoom } from './dungeonGenerationSystem';
+import type { DungeonState, RoomCoord, RoomData } from '../data/dungeonTypes.js';
+import { roomIdFromCoord } from '../utils/coord.js';
+import { createRoom } from './dungeonGenerationSystem.js';
 
 export function createDungeonState(seed: number): DungeonState {
   const origin: RoomCoord = { x: 0, y: 0 };
@@ -23,4 +23,3 @@ export function getOrCreateRoom(state: DungeonState, coord: RoomCoord): RoomData
   state.rooms.set(created.id, created);
   return created;
 }
-

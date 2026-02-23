@@ -1,4 +1,4 @@
-import { Coord, HeroState, PartyState } from '../data/dungeonTypes';
+import type { Coord, HeroState, PartyState } from '../data/dungeonTypes.js';
 
 const HERO_CLASSES: Array<'W' | 'R' | 'M'> = ['W', 'R', 'M'];
 
@@ -25,4 +25,3 @@ export function setActiveHero(state: PartyState, index: number): void {
   if (index < 0 || index >= state.heroes.length) return;
   state.activeHeroIndex = index;
 }
-

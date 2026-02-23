@@ -1,5 +1,5 @@
-import { Coord } from './data/dungeonTypes';
-import { TileType } from './data/tileTypes';
+import type { Coord } from './data/dungeonTypes.js';
+import { TileType } from './data/tileTypes.js';
 import {
   canWalkTile,
   commitMoveFromHover,
@@ -10,8 +10,8 @@ import {
   setActiveHeroIndex,
   stepMovement,
   updateHoverPath,
-} from './systems/gameSystem';
-import { inBounds, tileFromCanvas } from './utils/grid';
+} from './systems/gameSystem.js';
+import { inBounds, tileFromCanvas } from './utils/grid.js';
 
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 720;

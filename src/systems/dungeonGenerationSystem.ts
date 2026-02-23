@@ -1,7 +1,7 @@
-import { Coord, Direction, RoomCoord, RoomData } from '../data/dungeonTypes';
-import { TileType } from '../data/tileTypes';
-import { roomIdFromCoord } from '../utils/coord';
-import { createRng, seedFromRoom } from '../utils/seed';
+import type { Coord, Direction, RoomCoord, RoomData } from '../data/dungeonTypes.js';
+import { TileType } from '../data/tileTypes.js';
+import { roomIdFromCoord } from '../utils/coord.js';
+import { createRng, seedFromRoom } from '../utils/seed.js';
 
 export const ROOM_WIDTH = 16;
 export const ROOM_HEIGHT = 12;
@@ -98,4 +98,3 @@ function createSpawns(
 
   return selected;
 }
-

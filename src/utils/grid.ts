@@ -1,4 +1,4 @@
-import { Coord } from '../data/dungeonTypes';
+import type { Coord } from '../data/dungeonTypes.js';
 
 export function coordKey(coord: Coord): string {
   return `${coord.x},${coord.y}`;
@@ -29,4 +29,3 @@ export function tileFromCanvas(
     y: Math.floor((mouseY - offsetY) / tileSize),
   };
 }
-

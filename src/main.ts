@@ -284,7 +284,7 @@ function drawHud(): void {
     canvas.height - HUD_HEIGHT / 2,
   );
 
-  status.textContent = `Discovered rooms: ${state.dungeon.discoveredRoomIds.size}`;
+  status.textContent = `Discovered rooms: ${state.dungeon.discoveredRoomIds.size} | Seed: ${state.dungeon.seed}`;
 }
 
 /**

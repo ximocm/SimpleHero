@@ -1,5 +1,26 @@
 # Phase 2 Implementation Plan - Characters + Run UX
 
+## Status Check (2026-03-03)
+- Status: complete against the acceptance criteria in this document.
+- Verified in:
+  - `src/data/dungeonTypes.ts`
+  - `src/systems/gameSystem.ts`
+  - `src/systems/persistenceSystem.ts`
+  - `src/heroes/heroSystem.ts`
+  - `src/main.ts`
+- Acceptance criteria met:
+  - Live left-side hero panels render HP, Body, Mind, floor/room, and derived state badges.
+  - Panel click and `1/2/3` keyboard shortcuts both switch the active hero.
+  - Active hero is highlighted in both the panel UI and dungeon rendering.
+  - Exit-ready heroes are marked `Ready` and hidden from the dungeon canvas.
+  - Added hero runtime fields persist through autosave restore with backward-safe versioned loading.
+  - Movement, path preview, transition gating, and no-overlap tile checks still hold.
+- Extra scope already landed beyond Phase 2:
+  - Equipment slots and drag/drop loadout management.
+  - Party inventory persistence separate from run-state autosave.
+- Follow-up before Phase 3 combat work:
+  - Runtime item stats in `src/items/*.ts` should be aligned with `docs/items.md` before balance-sensitive combat logic depends on them.
+
 ## Goal
 Build a playable character-focused slice on top of current dungeon traversal:
 - Real character panels (left column) with live stats.

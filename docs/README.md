@@ -1,6 +1,7 @@
 # Docs Index
 
 - `gdd.md`: Main game design document and MVP scope.
+- `plans/`: Phase-by-phase implementation plans and execution notes.
 - `races.md`: Race stats and movement model.
 - `classes.md`: Class roles, skills, and spell behavior.
 - `enemies.md`: Concrete MVP enemy roster and spawn rules.

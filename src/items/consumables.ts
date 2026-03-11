@@ -12,7 +12,7 @@ export const CONSUMABLE_DEFINITIONS: Record<ConsumableId, ConsumableDefinition> 
   'health-potion': {
     id: 'health-potion',
     name: 'Health Potion',
-    file: 'assets/images/items/health-potion.svg',
+    file: 'assets/images/items/sm_h_potion.png',
     effect: 'heal',
     value: 6,
   },

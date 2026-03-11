@@ -1,8 +1,16 @@
-import type { Direction, DungeonState, RoomCoord, RoomData } from '../data/dungeonTypes.js';
+import type {
+  Direction,
+  DungeonState,
+  EnemyState,
+  RoomCoord,
+  RoomData,
+  RoomType,
+} from '../data/dungeonTypes.js';
 import { createRng, seedFromRoom } from '../utils/seed.js';
 import { moveRoomCoord, roomIdFromCoord } from '../utils/coord.js';
 import { TileType } from '../data/tileTypes.js';
 import { createRoom } from './dungeonGenerationSystem.js';
+import { getEntryDirectionForRoom, spawnEnemiesForRoom } from './enemySystem.js';
 
 const FLOOR_COUNT_WEIGHTS: Array<{ floors: number; weight: number }> = [
   { floors: 3, weight: 10 },
@@ -23,15 +31,33 @@ export function createDungeonState(seed: number): DungeonState {
   const totalFloors = rollFloorCount(seed);
   const coords = generateFloorCoords(seed, totalFloors);
   const rooms = new Map<string, RoomData>();
+  const enemiesByRoomId = new Map<string, EnemyState[]>();
   const floorByRoomId = new Map<string, number>();
 
   coords.forEach((coord, index) => {
-    const room = createRoom(seed, coord);
+    const roomType = chooseRoomType(seed, coord, index, totalFloors);
+    const room = createRoom(seed, coord, roomType);
     rooms.set(room.id, room);
     floorByRoomId.set(room.id, index + 1);
   });
 
   pruneDisconnectedExits(rooms);
+
+  coords.forEach((coord, index) => {
+    const roomId = roomIdFromCoord(coord);
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const previousCoord = index > 0 ? coords[index - 1] : null;
+    const entryDirection = getEntryDirectionForRoom(room, previousCoord);
+    const enemies = spawnEnemiesForRoom(seed, room, entryDirection);
+    enemiesByRoomId.set(room.id, enemies);
+
+    if (room.encounter) {
+      room.encounter.enemyIds = enemies.map((enemy) => enemy.id);
+      room.encounter.isCleared = enemies.length === 0;
+    }
+  });
 
   const originId = roomIdFromCoord(coords[0]);
   return {
@@ -39,6 +65,7 @@ export function createDungeonState(seed: number): DungeonState {
     totalFloors,
     floorByRoomId,
     rooms,
+    enemiesByRoomId,
     discoveredRoomIds: new Set([originId]),
     currentRoomId: originId,
   };
@@ -122,4 +149,21 @@ function pruneDisconnectedExits(rooms: Map<string, RoomData>): void {
       delete room.exits[direction];
     }
   }
+}
+
+/**
+ * Chooses a deterministic room type for a generated floor.
+ * @param seed Run seed.
+ * @param coord Room coordinate.
+ * @param index Zero-based floor index.
+ * @param totalFloors Total generated floor count.
+ * @returns Stable room type for that floor.
+ */
+function chooseRoomType(seed: number, coord: RoomCoord, index: number, totalFloors: number): RoomType {
+  if (index === totalFloors - 1) return 'exit';
+  if (index === 0) return 'treasure';
+
+  const roomId = roomIdFromCoord(coord);
+  const rng = createRng(seedFromRoom(seed, `${roomId}:room-type`));
+  return rng() < 0.7 ? 'combat' : 'treasure';
 }

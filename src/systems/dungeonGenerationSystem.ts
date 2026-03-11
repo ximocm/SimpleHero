@@ -1,4 +1,4 @@
-import type { Coord, Direction, RoomCoord, RoomData } from '../data/dungeonTypes.js';
+import type { Coord, Direction, RoomCoord, RoomData, RoomType } from '../data/dungeonTypes.js';
 import { TileType } from '../data/tileTypes.js';
 import { chooseRoomTemplate } from '../rooms/roomSelector.js';
 import type { RoomTemplate } from '../rooms/roomTemplates.js';
@@ -17,7 +17,7 @@ const EXIT_BY_MARKER: Record<string, Direction> = {
  * @param coord Room coordinate.
  * @returns Generated room data.
  */
-export function createRoom(runSeed: number, coord: RoomCoord): RoomData {
+export function createRoom(runSeed: number, coord: RoomCoord, roomType: RoomType): RoomData {
   const template = chooseRoomTemplate(runSeed, coord);
   const id = roomIdFromCoord(coord);
   const parsed = parseTemplate(template);
@@ -29,6 +29,8 @@ export function createRoom(runSeed: number, coord: RoomCoord): RoomData {
     height: parsed.height,
     tiles: parsed.tiles,
     exits: parsed.exits,
+    roomType,
+    encounter: roomType === 'combat' ? { enemyIds: [], isCleared: true } : null,
   };
 }
 

@@ -1,19 +1,33 @@
 import type { Coord } from './data/dungeonTypes.js';
 import { TileType } from './data/tileTypes.js';
 import {
+  canHeroBasicAttackEnemy,
+  canUseActiveHeroConsumable,
   canWalkTile,
   commitMoveFromHover,
   createGameState,
+  getActiveHeroConsumableActionView,
+  getCurrentRoomEncounterView,
+  getCurrentRoomEnemyViews,
+  getCurrentRoomEnemies,
   getCurrentFloorNumber,
   getHeroPanelViews,
   getCurrentRoom,
   getCurrentRoomCoordId,
   getTileAt,
+  isBackpackConsumableTargetable,
   setActiveHeroIndex,
   stepMovement,
+  toggleAttackMode,
+  toggleItemUseMode,
+  tryHeroAttackAtTile,
   updateHoverPath,
+  useActiveHeroBackpackConsumable,
 } from './systems/gameSystem.js';
+import { advanceAutomatedTurns, getTurnBannerView, isCurrentTurnHero, passTurn } from './systems/turnSystem.js';
 import {
+  clearPersistedGameState,
+  clearPersistedPartyInventory,
   loadPersistedGameState,
   loadPersistedPartyInventory,
   persistGameState,
@@ -25,6 +39,7 @@ import { createStarterPartyInventory, ITEM_DEFINITIONS } from './items/index.js'
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 720;
 const HUD_HEIGHT = 64;
+const MOVE_STEP_INTERVAL_MS = 180;
 const SHOW_FULL_DUNGEON_MAP = true;
 const PARTY_GOLD = 0;
 
@@ -33,6 +48,7 @@ const partyInventory = loadPersistedPartyInventory() ?? createStarterPartyInvent
 const itemById = new Map<string, (typeof ITEM_DEFINITIONS)[number]>(
   ITEM_DEFINITIONS.map((item) => [item.id, item]),
 );
+let lastMoveStepAt = 0;
 persistAll();
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -80,7 +96,10 @@ app.innerHTML = `
         <!-- Status Line -->
         <div id="status" style="margin-top:8px; color:#cbd5e1; font-size:14px;"></div>
         <!-- Controls Hint -->
-        <div style="margin-top:8px; color:#94a3b8; font-size:12px;">Mouse hover = A* preview | Click = move | 1/2/3 = active hero</div>
+        <div id="controlsHint" style="margin-top:8px; color:#94a3b8; font-size:12px;"></div>
+        <!-- Combat Log -->
+        <div style="margin-top:10px; font-size:14px; color:#94a3b8;">combat log</div>
+        <div id="combatLog" style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:#e2e8f0; margin-top:6px;"></div>
       </div>
     </div>
 
@@ -90,6 +109,34 @@ app.innerHTML = `
       <canvas id="minimapCanvas" width="220" height="220" style="background:transparent"></canvas>
       <!-- Gold + Inventory Panel -->
       <div style="min-height:420px; padding:14px; background:rgba(15,23,42,0.55);">
+        <button
+          id="resetStateButton"
+          type="button"
+          style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(248,113,113,0.5); background:rgba(127,29,29,0.55); color:#fee2e2; cursor:pointer;"
+        >
+          reset saved state
+        </button>
+        <button
+          id="attackButton"
+          type="button"
+          style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(251,191,36,0.45); background:rgba(120,53,15,0.45); color:#fef3c7; cursor:pointer;"
+        >
+          basic attack
+        </button>
+        <button
+          id="useItemButton"
+          type="button"
+          style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(74,222,128,0.45); background:rgba(20,83,45,0.45); color:#dcfce7; cursor:pointer;"
+        >
+          use item
+        </button>
+        <button
+          id="endTurnButton"
+          type="button"
+          style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(96,165,250,0.45); background:rgba(30,64,175,0.45); color:#dbeafe; cursor:pointer;"
+        >
+          end heroes turn
+        </button>
         <!-- Gold Section -->
         <div id="goldValue" style="margin-bottom:12px;">gold: 0</div>
         <!-- Party Inventory Section -->
@@ -103,9 +150,15 @@ app.innerHTML = `
 const canvas = requireElement<HTMLCanvasElement>('#gameCanvas');
 const minimapCanvas = requireElement<HTMLCanvasElement>('#minimapCanvas');
 const status = requireElement<HTMLDivElement>('#status');
+const controlsHint = requireElement<HTMLDivElement>('#controlsHint');
 const characterPanels = requireElement<HTMLDivElement>('#characterPanels');
 const goldValue = requireElement<HTMLDivElement>('#goldValue');
+const combatLog = requireElement<HTMLDivElement>('#combatLog');
 const partyInventoryList = requireElement<HTMLDivElement>('#partyInventoryList');
+const resetStateButton = requireElement<HTMLButtonElement>('#resetStateButton');
+const attackButton = requireElement<HTMLButtonElement>('#attackButton');
+const useItemButton = requireElement<HTMLButtonElement>('#useItemButton');
+const endTurnButton = requireElement<HTMLButtonElement>('#endTurnButton');
 
 const ctx = requireContext(canvas);
 const minimapCtx = requireContext(minimapCanvas);
@@ -119,6 +172,24 @@ type DragPayload =
 characterPanels.addEventListener('click', (event) => {
   const target = event.target as HTMLElement | null;
   if (!target) return;
+
+  const backpackItem = target.closest<HTMLElement>('[data-backpack-item-id]');
+  if (backpackItem) {
+    const heroIndex = Number(backpackItem.dataset.heroIndex);
+    const itemId = backpackItem.dataset.backpackItemId;
+    if (Number.isInteger(heroIndex) && itemId) {
+      setActiveHeroIndex(state, heroIndex);
+      const used = useActiveHeroBackpackConsumable(state, itemId);
+      if (used) {
+        persistAll();
+        renderCharacterPanels();
+        renderPartyInventory();
+        renderCombatLog();
+        return;
+      }
+    }
+  }
+
   const panel = target.closest<HTMLElement>('[data-hero-index]');
   if (!panel) return;
 
@@ -217,6 +288,34 @@ partyInventoryList.addEventListener('drop', (event) => {
   renderPartyInventory();
 });
 
+resetStateButton.addEventListener('click', () => {
+  clearPersistedGameState();
+  clearPersistedPartyInventory();
+  window.location.reload();
+});
+
+attackButton.addEventListener('click', () => {
+  toggleAttackMode(state);
+  persistAll();
+  renderCharacterPanels();
+  renderCombatLog();
+});
+
+useItemButton.addEventListener('click', () => {
+  const toggled = toggleItemUseMode(state);
+  if (!toggled && !state.itemUseModeHeroId) return;
+  persistAll();
+  renderCharacterPanels();
+  renderCombatLog();
+});
+
+endTurnButton.addEventListener('click', () => {
+  passTurn(state);
+  persistAll();
+  renderCharacterPanels();
+  renderCombatLog();
+});
+
 /**
  * Computes tile size that fits current room into canvas viewport.
  * @returns Tile size in pixels.
@@ -284,6 +383,12 @@ canvas.addEventListener('click', (event) => {
   );
 
   if (!inBounds(target, room.width, room.height)) return;
+  if (tryHeroAttackAtTile(state, target)) {
+    persistAll();
+    renderCharacterPanels();
+    renderCombatLog();
+    return;
+  }
   if (!canWalkTile(room, target)) return;
 
   updateHoverPath(state, target);
@@ -295,9 +400,16 @@ window.addEventListener('keydown', (event) => {
   if (event.key === '1') setActiveHeroIndex(state, 0);
   if (event.key === '2') setActiveHeroIndex(state, 1);
   if (event.key === '3') setActiveHeroIndex(state, 2);
+  if (event.key === ' ' || event.key.toLowerCase() === 'e') {
+    passTurn(state);
+    persistAll();
+    renderCharacterPanels();
+    renderCombatLog();
+  }
   if (event.key === '1' || event.key === '2' || event.key === '3') {
     persistAll();
     renderCharacterPanels();
+    renderCombatLog();
   }
 });
 
@@ -367,6 +479,33 @@ function draw(): void {
     ctx.fillText(hero.classLetter, cx, cy);
   });
 
+  const roomEnemies = getCurrentRoomEnemyViews(state);
+  roomEnemies.forEach((enemy) => {
+    if (enemy.hp <= 0) return;
+
+    const cx = offset.x + enemy.tile.x * tileSize + tileSize / 2;
+    const cy = offset.y + enemy.tile.y * tileSize + tileSize / 2;
+    const radius = tileSize * 0.26;
+
+    ctx.fillStyle = enemy.kind === 'skeleton-archer' ? '#fb7185' : '#ef4444';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = enemy.isAttackTargetable ? '#fde68a' : '#3f0d16';
+    ctx.lineWidth = enemy.isAttackTargetable ? 3 : 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff7ed';
+    ctx.font = `${Math.max(10, Math.floor(tileSize * 0.24))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(enemy.kind === 'skeleton-archer' ? 'A' : 'S', cx, cy);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `${Math.max(9, Math.floor(tileSize * 0.2))}px sans-serif`;
+    ctx.fillText(`${enemy.hp}/${enemy.maxHp}`, cx, cy + radius + 10);
+  });
+
   drawHud();
   drawMinimap();
 }
@@ -386,13 +525,68 @@ function drawHud(): void {
 
   const active = state.party.heroes[state.party.activeHeroIndex];
   const ready = `${state.readyByHeroId.size}/3`;
+  const encounter = getCurrentRoomEncounterView(state);
+  const turn = getTurnBannerView(state);
+  const encounterLabel =
+    encounter.roomType === 'combat'
+      ? encounter.isBlockingExit
+        ? `Combat Locked`
+        : `Combat Clear`
+      : encounter.roomType === 'treasure'
+        ? 'Treasure'
+        : 'Exit';
   ctx.fillText(
-    `Floor ${getCurrentFloorNumber(state)}/${state.dungeon.totalFloors} | Room ${getCurrentRoomCoordId(state)} | Active ${active.classLetter} | Exit Ready ${ready}`,
+    `Floor ${getCurrentFloorNumber(state)}/${state.dungeon.totalFloors} | Room ${getCurrentRoomCoordId(state)} | ${encounterLabel} | Round ${turn.round || '-'} | Enemies ${encounter.enemyCount} | Active ${active.classLetter} | Exit Ready ${ready}`,
     12,
     canvas.height - HUD_HEIGHT / 2,
   );
 
-  status.textContent = `Discovered rooms: ${state.dungeon.discoveredRoomIds.size} | Seed: ${state.dungeon.seed}`;
+  const heroResources = turn.heroResources;
+  const heroResourcesText = heroResources
+    ? ` | Move ${heroResources.movementRemaining} | AP ${heroResources.actionPointsRemaining} | Attack ${heroResources.attackSlotAvailable ? 'ready' : 'spent'}`
+    : '';
+  const weaponText = getSelectedHeroWeaponSummary();
+  const lastRollText = getLastRollSummary();
+  status.textContent = `Discovered rooms: ${state.dungeon.discoveredRoomIds.size} | Seed: ${state.dungeon.seed} | Room type: ${encounter.roomType} | Turn: ${turn.activeLabel}${heroResourcesText} | Weapon: ${weaponText}${lastRollText ? ` | ${lastRollText}` : ''}`;
+  controlsHint.textContent =
+    state.attackModeHeroId
+      ? 'Attack mode: click a highlighted enemy to attack | 1/2/3 or click card = active hero'
+      : state.itemUseModeHeroId
+        ? 'Item mode: click a highlighted consumable in the active hero backpack'
+      : 'Mouse hover = A* preview | Click = move/attack target | 1/2/3 or click card = active hero';
+  const activeHero = state.party.heroes[state.party.activeHeroIndex];
+  const hasAttackTarget =
+    state.turn?.phase === 'heroes' &&
+    getCurrentRoomEnemies(state).some((enemy) => canHeroBasicAttackEnemy(state, activeHero.id, enemy.id));
+  attackButton.disabled = !turn.isCombatActive || !isCurrentTurnHero(state);
+  attackButton.style.opacity = attackButton.disabled ? '0.5' : '1';
+  attackButton.textContent = state.attackModeHeroId === activeHero.id ? 'cancel attack' : hasAttackTarget ? 'basic attack' : 'basic attack';
+  const consumableAction = getActiveHeroConsumableActionView(state);
+  useItemButton.disabled = !canUseActiveHeroConsumable(state);
+  useItemButton.style.opacity = useItemButton.disabled ? '0.5' : '1';
+  useItemButton.textContent =
+    state.itemUseModeHeroId === activeHero.id ? 'cancel item' : 'use item';
+  endTurnButton.disabled = !turn.isCombatActive || !isCurrentTurnHero(state);
+  endTurnButton.style.opacity = endTurnButton.disabled ? '0.5' : '1';
+  endTurnButton.textContent = turn.isCombatActive && isCurrentTurnHero(state) ? 'end heroes turn' : 'enemy turn running';
+}
+
+function getSelectedHeroWeaponSummary(): string {
+  const hero = state.party.heroes[state.party.activeHeroIndex];
+  if (!hero) return 'none';
+
+  const weaponId = hero.equipment.rightHand ?? hero.equipment.leftHand;
+  if (!weaponId) return 'Unarmed | dice 1 | damage 1 | range 1';
+
+  const weapon = itemById.get(weaponId);
+  if (!weapon || weapon.category !== 'weapon') return weaponId;
+  return `${weapon.name} | dice ${weapon.attackDice} | damage ${weapon.damage} | range ${weapon.range}`;
+}
+
+function getLastRollSummary(): string {
+  const roll = state.lastCombatRoll;
+  if (!roll) return '';
+  return `Last roll atk[${roll.attackRolls.join(',')}] def[${roll.defenseRolls.join(',')}] dmg ${roll.finalDamage}`;
 }
 
 /**
@@ -445,6 +639,12 @@ function renderCharacterPanels(): void {
       const border = hero.isActive ? '#fbbf24' : 'rgba(148,163,184,0.25)';
       const badgeLabel = hero.isReadyAtExit ? 'Ready' : hero.isActive ? 'Active' : 'Idle';
       const badgeColor = hero.isReadyAtExit ? '#22c55e' : hero.isActive ? '#fbbf24' : '#94a3b8';
+      const turnEconomy =
+        hero.movementRemaining !== null
+          ? `Move ${hero.movementRemaining} · AP ${hero.actionPointsRemaining ?? 0} · Attack ${
+              hero.attackSlotAvailable ? 'Ready' : 'Spent'
+            }`
+          : 'Move - · AP - · Attack -';
 
       return `
         <div
@@ -461,6 +661,7 @@ function renderCharacterPanels(): void {
             <div style="width:${hpPercent}%; height:100%; background:#22c55e;"></div>
           </div>
           <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;">Body ${hero.body} · Mind ${hero.mind}</div>
+          <div style="font-size:11px; color:#93c5fd; margin-bottom:8px;">${turnEconomy}</div>
           <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
             ${renderEquipSlot(index, 'armor', 'A', hero.armor)}
             ${renderEquipSlot(index, 'leftHand', 'L', hero.leftHand)}
@@ -512,6 +713,20 @@ function renderPartyInventory(): void {
     .join('');
 }
 
+function renderCombatLog(): void {
+  if (state.recentCombatLog.length === 0) {
+    combatLog.innerHTML = '<div style="color:#64748b;">No combat rolls yet</div>';
+    return;
+  }
+
+  combatLog.innerHTML = state.recentCombatLog
+    .map(
+      (entry) =>
+        `<div style="padding:6px; background:rgba(15,23,42,0.45); border:1px solid rgba(148,163,184,0.15);">${entry}</div>`,
+    )
+    .join('');
+}
+
 function renderEquipSlot(
   heroIndex: number,
   slot: Exclude<EquipSlot, 'backpack'>,
@@ -550,11 +765,17 @@ function renderBackpackItems(heroIndex: number): string {
     .map((itemId, backpackIndex) => {
       const item = itemById.get(itemId);
       if (!item) return '';
+      const hero = state.party.heroes[heroIndex];
+      const isTargetable = hero ? isBackpackConsumableTargetable(state, hero.id, itemId) : false;
       return `<span data-drag-source="backpack" data-item-id="${itemId}" data-hero-index="${heroIndex}" data-backpack-index="${backpackIndex}" draggable="true" title="${escapeAttr(
         getItemTooltip(itemId),
-      )}" style="display:inline-block; margin-right:6px; cursor:grab;"><img src="/${
+      )}" data-backpack-item-id="${itemId}" style="display:inline-block; margin-right:6px; cursor:${
+        isTargetable ? 'pointer' : 'grab'
+      };"><img src="/${
         item.file
-      }" alt="${item.name}" width="20" height="20" style="image-rendering:pixelated; border:1px solid rgba(148,163,184,0.35); background:rgba(148,163,184,0.14);" /></span>`;
+      }" alt="${item.name}" width="20" height="20" style="image-rendering:pixelated; border:1px solid ${
+        isTargetable ? 'rgba(74,222,128,0.9)' : 'rgba(148,163,184,0.35)'
+      }; background:${isTargetable ? 'rgba(20,83,45,0.45)' : 'rgba(148,163,184,0.14)'};" /></span>`;
     })
     .join('');
 }
@@ -797,11 +1018,17 @@ function facingTriangle(
  * @returns Nothing.
  */
 function tick(): void {
-  const moved = stepMovement(state);
+  const now = performance.now();
+  const advancedTurn = advanceAutomatedTurns(state, now);
+  const moved = now - lastMoveStepAt >= MOVE_STEP_INTERVAL_MS ? stepMovement(state) : false;
   if (moved) {
+    lastMoveStepAt = now;
+  }
+  if (advancedTurn || moved) {
     persistAll();
     renderCharacterPanels();
     renderPartyInventory();
+    renderCombatLog();
   }
   draw();
   requestAnimationFrame(tick);
@@ -817,6 +1044,7 @@ window.addEventListener('beforeunload', () => {
 
 renderCharacterPanels();
 renderPartyInventory();
+renderCombatLog();
 tick();
 
 /**

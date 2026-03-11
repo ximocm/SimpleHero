@@ -1,4 +1,16 @@
-import type { Coord, Direction, DungeonState, PartyState, RoomData } from '../data/dungeonTypes.js';
+import type {
+  CombatTurnState,
+  CombatRollSnapshot,
+  Coord,
+  Direction,
+  DungeonState,
+  EnemyState,
+  HeroState,
+  PartyState,
+  RoomData,
+  RoomEncounterState,
+  RoomType,
+} from '../data/dungeonTypes.js';
 import { isWalkable, TileType } from '../data/tileTypes.js';
 import {
   moveRoomCoord,
@@ -10,6 +22,17 @@ import { inBounds } from '../utils/grid.js';
 import { findPathAStar } from '../utils/pathfinding.js';
 import { createDungeonState, getRoomAt } from './dungeonStateSystem.js';
 import { createParty, getActiveHero, setActiveHero } from './partySystem.js';
+import { getHeroAttackRange, performHeroAttack } from './combatSystem.js';
+import { CONSUMABLE_DEFINITIONS } from '../items/consumables.js';
+import {
+  canHeroActNow,
+  canSelectHeroThisPhase,
+  consumeHeroActionPoint,
+  consumeHeroMovement,
+  getCurrentHeroTurnResources,
+  getHeroFinalMovement,
+  syncCombatTurnState,
+} from './turnSystem.js';
 
 export interface GameState {
   dungeon: DungeonState;
@@ -17,6 +40,13 @@ export interface GameState {
   hoverPath: Coord[];
   movingPath: Coord[];
   readyByHeroId: Map<string, Direction>;
+  turn: CombatTurnState | null;
+  turnAutomationReadyAt: number | null;
+  combatRngState: number;
+  attackModeHeroId: string | null;
+  itemUseModeHeroId: string | null;
+  recentCombatLog: string[];
+  lastCombatRoll: CombatRollSnapshot | null;
 }
 
 export interface HeroPanelView {
@@ -37,6 +67,30 @@ export interface HeroPanelView {
   floorNumber: number;
   isActive: boolean;
   isReadyAtExit: boolean;
+  movementRemaining: number | null;
+  actionPointsRemaining: number | null;
+  attackSlotAvailable: boolean | null;
+}
+
+export interface RoomEncounterView {
+  roomType: RoomType;
+  isBlockingExit: boolean;
+  isCleared: boolean;
+  enemyCount: number;
+}
+
+export interface EnemyBoardView {
+  id: string;
+  kind: EnemyState['kind'];
+  tile: Coord;
+  hp: number;
+  maxHp: number;
+  isAttackTargetable: boolean;
+}
+
+export interface ConsumableActionView {
+  label: string;
+  isAvailable: boolean;
 }
 
 /**
@@ -54,14 +108,22 @@ export function createGameState(seed: number): GameState {
   const center = { x: Math.floor(room.width / 2), y: Math.floor(room.height / 2) };
   const initialStartTiles = getClosestWalkableTiles(room, center, 3);
   const party = createParty(room.id, initialStartTiles);
-
-  return {
+  const state: GameState = {
     dungeon,
     party,
     hoverPath: [],
     movingPath: [],
     readyByHeroId: new Map(),
+    turn: null,
+    turnAutomationReadyAt: null,
+    combatRngState: (seed ^ 0x9e3779b9) >>> 0,
+    attackModeHeroId: null,
+    itemUseModeHeroId: null,
+    recentCombatLog: [],
+    lastCombatRoll: null,
   };
+  syncCombatTurnState(state);
+  return state;
 }
 
 /**
@@ -82,9 +144,18 @@ export function getCurrentRoom(state: GameState): RoomData {
  * @returns Nothing.
  */
 export function setActiveHeroIndex(state: GameState, index: number): void {
+  const nextHero = state.party.heroes[index];
+  if (!nextHero) return;
+  if (!canSelectHeroThisPhase(state, nextHero.id)) return;
   setActiveHero(state.party, index);
   state.hoverPath = [];
   state.movingPath = [];
+  if (state.attackModeHeroId && state.attackModeHeroId !== nextHero.id) {
+    state.attackModeHeroId = nextHero.id;
+  }
+  if (state.itemUseModeHeroId && state.itemUseModeHeroId !== nextHero.id) {
+    state.itemUseModeHeroId = nextHero.id;
+  }
 }
 
 /**
@@ -96,13 +167,21 @@ export function setActiveHeroIndex(state: GameState, index: number): void {
 export function updateHoverPath(state: GameState, target: Coord): void {
   const room = getCurrentRoom(state);
   const hero = getActiveHero(state.party);
-  if (state.readyByHeroId.has(hero.id)) {
+  if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) {
     state.hoverPath = [];
     return;
   }
-  state.hoverPath = findPathAStar(hero.tile, target, (coord) =>
-    canWalkTile(room, coord) && !isTileOccupiedByOtherHero(state, room.id, coord, hero.id),
+  const path = findPathAStar(hero.tile, target, (coord) =>
+    canWalkTile(room, coord) &&
+    !isTileOccupiedByOtherHero(state, room.id, coord, hero.id) &&
+    !isTileOccupiedByEnemy(state, room.id, coord),
   );
+  const resources = getCurrentHeroTurnResources(state);
+  if (resources && path.length > 1 && path.length - 1 > resources.movementRemaining) {
+    state.hoverPath = [];
+    return;
+  }
+  state.hoverPath = path;
 }
 
 /**
@@ -112,7 +191,9 @@ export function updateHoverPath(state: GameState, target: Coord): void {
  */
 export function commitMoveFromHover(state: GameState): void {
   const hero = getActiveHero(state.party);
-  if (state.readyByHeroId.has(hero.id)) return;
+  if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) return;
+  if (state.attackModeHeroId) return;
+  if (state.itemUseModeHeroId) return;
   if (state.hoverPath.length < 2) return;
   state.movingPath = [...state.hoverPath];
 }
@@ -124,7 +205,9 @@ export function commitMoveFromHover(state: GameState): void {
  */
 export function stepMovement(state: GameState): boolean {
   const hero = getActiveHero(state.party);
-  if (state.readyByHeroId.has(hero.id)) return false;
+  if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) return false;
+  if (state.attackModeHeroId) return false;
+  if (state.itemUseModeHeroId) return false;
   if (state.movingPath.length < 2) return false;
 
   state.movingPath.shift();
@@ -134,12 +217,21 @@ export function stepMovement(state: GameState): boolean {
     state.movingPath = [];
     return false;
   }
+  if (isTileOccupiedByEnemy(state, hero.roomId, next)) {
+    state.movingPath = [];
+    return false;
+  }
 
   updateFacing(hero.tile, next, hero);
   hero.tile = { ...next };
+  const movementRemaining = consumeHeroMovement(state, hero.id);
 
   refreshExitReady(state, hero.id, hero.tile);
   maybeTransitionRoom(state);
+  if (movementRemaining <= 0) {
+    state.hoverPath = [];
+    state.movingPath = [];
+  }
   return true;
 }
 
@@ -177,6 +269,11 @@ function updateFacing(from: Coord, to: Coord, hero: PartyState['heroes'][number]
  */
 function refreshExitReady(state: GameState, heroId: string, tile: Coord): void {
   const room = getCurrentRoom(state);
+  if (isRoomEncounterBlockingExit(room)) {
+    state.readyByHeroId.delete(heroId);
+    return;
+  }
+
   const direction = findExitDirection(room, tile);
   if (direction) {
     state.readyByHeroId.set(heroId, direction);
@@ -205,13 +302,18 @@ function findExitDirection(room: RoomData, tile: Coord): Direction | null {
  * @returns Nothing.
  */
 function maybeTransitionRoom(state: GameState): void {
+  const current = getCurrentRoom(state);
+  if (isRoomEncounterBlockingExit(current)) {
+    state.readyByHeroId.clear();
+    return;
+  }
+
   if (state.readyByHeroId.size !== 3) return;
 
   const directions = Array.from(state.readyByHeroId.values());
   const direction = directions[0];
   if (!directions.every((d) => d === direction)) return;
 
-  const current = getCurrentRoom(state);
   const nextCoord = moveRoomCoord(current.coord, direction);
   const nextRoom = getRoomAt(state.dungeon, nextCoord);
   if (!nextRoom) return;
@@ -234,6 +336,7 @@ function maybeTransitionRoom(state: GameState): void {
   state.readyByHeroId.clear();
   state.hoverPath = [];
   state.movingPath = [];
+  syncCombatTurnState(state);
 }
 
 /**
@@ -344,28 +447,293 @@ export function getCurrentFloorNumber(state: GameState): number {
 }
 
 /**
+ * Returns current room type and encounter status for HUD/UI.
+ * @param state Game state.
+ * @returns Encounter view for current room.
+ */
+export function getCurrentRoomEncounterView(state: GameState): RoomEncounterView {
+  const room = getCurrentRoom(state);
+  const encounter = room.encounter;
+  const enemyCount = getCurrentRoomEnemies(state).length;
+  const isCleared = encounter?.isCleared ?? true;
+
+  return {
+    roomType: room.roomType,
+    isBlockingExit: isRoomEncounterBlockingExit(room),
+    isCleared,
+    enemyCount,
+  };
+}
+
+/**
  * Returns panel-ready hero view data for UI rendering.
  * @param state Game state.
  * @returns Ordered hero view models for panel display.
  */
 export function getHeroPanelViews(state: GameState): HeroPanelView[] {
-  return state.party.heroes.map((hero, index) => ({
-    id: hero.id,
-    classLetter: hero.classLetter,
-    className: hero.className,
-    raceName: hero.raceName,
-    hp: hero.hp,
-    maxHp: hero.maxHp,
-    body: hero.body,
-    mind: hero.mind,
-    armor: hero.equipment.armor,
-    leftHand: hero.equipment.leftHand,
-    rightHand: hero.equipment.rightHand,
-    relic: hero.equipment.relic,
-    backpackCount: hero.equipment.backpack.length,
-    roomId: hero.roomId,
-    floorNumber: state.dungeon.floorByRoomId.get(hero.roomId) ?? 1,
-    isActive: index === state.party.activeHeroIndex,
-    isReadyAtExit: state.readyByHeroId.has(hero.id),
+  return state.party.heroes.map((hero, index) => {
+    const turn = state.turn;
+    const isHeroPhaseInCurrentRoom = turn?.phase === 'heroes' && hero.roomId === turn.roomId;
+    const turnResources = isHeroPhaseInCurrentRoom
+      ? turn.heroResourcesById[hero.id] ?? {
+          movementRemaining: getHeroFinalMovement(hero),
+          actionPointsRemaining: 2,
+          attackSlotAvailable: true,
+        }
+      : null;
+
+    return {
+      id: hero.id,
+      classLetter: hero.classLetter,
+      className: hero.className,
+      raceName: hero.raceName,
+      hp: hero.hp,
+      maxHp: hero.maxHp,
+      body: hero.body,
+      mind: hero.mind,
+      armor: hero.equipment.armor,
+      leftHand: hero.equipment.leftHand,
+      rightHand: hero.equipment.rightHand,
+      relic: hero.equipment.relic,
+      backpackCount: hero.equipment.backpack.length,
+      roomId: hero.roomId,
+      floorNumber: state.dungeon.floorByRoomId.get(hero.roomId) ?? 1,
+      isActive: index === state.party.activeHeroIndex,
+      isReadyAtExit: state.readyByHeroId.has(hero.id),
+      movementRemaining: turnResources?.movementRemaining ?? null,
+      actionPointsRemaining: turnResources?.actionPointsRemaining ?? null,
+      attackSlotAvailable: turnResources?.attackSlotAvailable ?? null,
+    };
+  });
+}
+
+/**
+ * Returns spawned enemies currently belonging to the active room.
+ * @param state Game state.
+ * @returns Room enemy array.
+ */
+export function getCurrentRoomEnemies(state: GameState): EnemyState[] {
+  return state.dungeon.enemiesByRoomId.get(state.dungeon.currentRoomId) ?? [];
+}
+
+/**
+ * Returns enemy board view data for rendering and attack targeting.
+ * @param state Game state.
+ * @returns Enemy render models.
+ */
+export function getCurrentRoomEnemyViews(state: GameState): EnemyBoardView[] {
+  const hero = getActiveHero(state.party);
+  const attackHeroId = state.attackModeHeroId;
+  return getCurrentRoomEnemies(state).map((enemy) => ({
+    id: enemy.id,
+    kind: enemy.kind,
+    tile: enemy.tile,
+    hp: enemy.hp,
+    maxHp: enemy.maxHp,
+    isAttackTargetable:
+      enemy.hp > 0 &&
+      attackHeroId === hero.id &&
+      canHeroBasicAttackEnemy(state, hero.id, enemy.id),
   }));
+}
+
+/**
+ * Enables/disables basic attack targeting for the active hero.
+ * @param state Game state.
+ * @returns `true` when attack mode is now active.
+ */
+export function toggleAttackMode(state: GameState): boolean {
+  const hero = getActiveHero(state.party);
+  if (!canHeroActNow(state, hero.id)) return false;
+  const resources = getCurrentHeroTurnResources(state);
+  if (!resources?.attackSlotAvailable) return false;
+
+  state.movingPath = [];
+  state.hoverPath = [];
+  state.attackModeHeroId = state.attackModeHeroId === hero.id ? null : hero.id;
+  state.itemUseModeHeroId = null;
+  return state.attackModeHeroId === hero.id;
+}
+
+/**
+ * Resolves a basic attack from the selected hero to a clicked enemy tile.
+ * @param state Game state.
+ * @param target Destination tile clicked on canvas.
+ * @returns `true` when an attack was performed.
+ */
+export function tryHeroAttackAtTile(state: GameState, target: Coord): boolean {
+  const hero = getActiveHero(state.party);
+  if (state.attackModeHeroId !== hero.id) return false;
+
+  const enemy = getCurrentRoomEnemies(state).find((candidate) => candidate.hp > 0 && sameCoord(candidate.tile, target));
+  if (!enemy) return false;
+  if (!canHeroBasicAttackEnemy(state, hero.id, enemy.id)) return false;
+
+  const result = performHeroAttack(state, hero, enemy);
+  const resources = state.turn?.heroResourcesById[hero.id];
+  if (resources) resources.attackSlotAvailable = false;
+  state.lastCombatRoll = result.roll;
+  state.recentCombatLog.unshift(formatCombatLogEntry(hero.className, enemy.kind, result.roll, result.defenderDefeated));
+  state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  state.attackModeHeroId = null;
+  state.itemUseModeHeroId = null;
+  state.hoverPath = [];
+  state.movingPath = [];
+  syncCombatTurnState(state);
+  return true;
+}
+
+/**
+ * Returns whether a hero can basic-attack a given enemy right now.
+ * @param state Game state.
+ * @param heroId Hero identifier.
+ * @param enemyId Enemy identifier.
+ * @returns `true` when the target is in range and the slot is available.
+ */
+export function canHeroBasicAttackEnemy(state: GameState, heroId: string, enemyId: string): boolean {
+  const hero = state.party.heroes.find((candidate) => candidate.id === heroId);
+  const enemy = getCurrentRoomEnemies(state).find((candidate) => candidate.id === enemyId && candidate.hp > 0);
+  if (!hero || !enemy) return false;
+  if (!canHeroActNow(state, heroId)) return false;
+
+  const resources = state.turn?.heroResourcesById[heroId];
+  if (state.turn && !resources?.attackSlotAvailable) return false;
+
+  return manhattanDistance(hero.tile, enemy.tile) <= getHeroAttackRange(hero);
+}
+
+/**
+ * Returns whether the active hero can use their equipped consumable.
+ * @param state Game state.
+ * @returns `true` when a relic consumable can be used now.
+ */
+export function canUseActiveHeroConsumable(state: GameState): boolean {
+  const hero = getActiveHero(state.party);
+  if (state.turn) {
+    if (!canHeroActNow(state, hero.id)) return false;
+    const resources = state.turn.heroResourcesById[hero.id];
+    if (!resources || resources.actionPointsRemaining <= 0) return false;
+  }
+  return hero.equipment.backpack.some((itemId) => isUsableConsumable(itemId, hero));
+}
+
+/**
+ * Returns action-button view data for the active hero consumable.
+ * @param state Game state.
+ * @returns Consumable action view.
+ */
+export function getActiveHeroConsumableActionView(state: GameState): ConsumableActionView {
+  const hero = getActiveHero(state.party);
+  const consumableId = hero.equipment.backpack.find((itemId) => isUsableConsumable(itemId, hero));
+  if (!consumableId) {
+    return {
+      label: 'use item',
+      isAvailable: false,
+    };
+  }
+
+  const consumable = CONSUMABLE_DEFINITIONS[consumableId as keyof typeof CONSUMABLE_DEFINITIONS];
+  return {
+    label: consumable ? `use ${consumable.name}` : 'use item',
+    isAvailable: canUseActiveHeroConsumable(state),
+  };
+}
+
+/**
+ * Enables/disables backpack consumable use mode for the active hero.
+ * @param state Game state.
+ * @returns `true` when item use mode is now active.
+ */
+export function toggleItemUseMode(state: GameState): boolean {
+  const hero = getActiveHero(state.party);
+  if (!canUseActiveHeroConsumable(state)) return false;
+  state.attackModeHeroId = null;
+  state.movingPath = [];
+  state.hoverPath = [];
+  state.itemUseModeHeroId = state.itemUseModeHeroId === hero.id ? null : hero.id;
+  return state.itemUseModeHeroId === hero.id;
+}
+
+/**
+ * Uses one consumable from the active hero backpack and consumes 1 AP in combat.
+ * @param state Game state.
+ * @param itemId Consumable item id selected from backpack.
+ * @returns `true` when an item was used.
+ */
+export function useActiveHeroBackpackConsumable(state: GameState, itemId: string): boolean {
+  const hero = getActiveHero(state.party);
+  if (state.itemUseModeHeroId !== hero.id) return false;
+  if (!canUseActiveHeroConsumable(state)) return false;
+  const backpackIndex = hero.equipment.backpack.findIndex((entry) => entry === itemId);
+  if (backpackIndex < 0) return false;
+
+  const consumable = CONSUMABLE_DEFINITIONS[itemId as keyof typeof CONSUMABLE_DEFINITIONS];
+  if (!consumable) return false;
+  if (!isUsableConsumable(itemId, hero)) return false;
+
+  if (consumable.effect === 'heal') {
+    hero.hp = Math.min(hero.maxHp, hero.hp + consumable.value);
+  }
+
+  hero.equipment.backpack.splice(backpackIndex, 1);
+  if (state.turn) {
+    consumeHeroActionPoint(state, hero.id);
+  }
+  state.attackModeHeroId = null;
+  state.itemUseModeHeroId = null;
+  state.recentCombatLog.unshift(`${hero.className} used ${consumable.name} and restored ${consumable.value} HP`);
+  state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  return true;
+}
+
+/**
+ * Returns whether a backpack item should be highlighted as usable right now.
+ * @param state Game state.
+ * @param heroId Hero identifier.
+ * @param itemId Backpack item id.
+ * @returns `true` when the item is a currently usable consumable in use mode.
+ */
+export function isBackpackConsumableTargetable(state: GameState, heroId: string, itemId: string): boolean {
+  const hero = state.party.heroes.find((candidate) => candidate.id === heroId);
+  if (!hero) return false;
+  return state.itemUseModeHeroId === heroId && hero.equipment.backpack.includes(itemId) && isUsableConsumable(itemId, hero);
+}
+
+function isUsableConsumable(itemId: string, hero: HeroState): boolean {
+  const consumable = CONSUMABLE_DEFINITIONS[itemId as keyof typeof CONSUMABLE_DEFINITIONS];
+  if (!consumable) return false;
+  if (consumable.effect === 'heal') return hero.hp < hero.maxHp;
+  return false;
+}
+
+/**
+ * Returns whether a room currently blocks exit transitions.
+ * @param room Room to inspect.
+ * @returns `true` when encounter must be cleared before leaving.
+ */
+export function isRoomEncounterBlockingExit(room: RoomData): boolean {
+  return room.roomType === 'combat' && room.encounter !== null && !room.encounter.isCleared;
+}
+
+/**
+ * Returns the encounter state for a room if present.
+ * @param room Room to inspect.
+ * @returns Encounter state or `null`.
+ */
+export function getRoomEncounter(room: RoomData): RoomEncounterState | null {
+  return room.encounter;
+}
+
+function isTileOccupiedByEnemy(state: GameState, roomId: string, coord: Coord): boolean {
+  const roomEnemies = state.dungeon.enemiesByRoomId.get(roomId) ?? [];
+  return roomEnemies.some((enemy) => enemy.hp > 0 && sameCoord(enemy.tile, coord));
+}
+
+function formatCombatLogEntry(
+  attackerLabel: string,
+  defenderLabel: string,
+  roll: CombatRollSnapshot,
+  defenderDefeated: boolean,
+): string {
+  return `${attackerLabel} -> ${defenderLabel} | atk [${roll.attackRolls.join(',')}] def [${roll.defenseRolls.join(',')}] dmg ${roll.finalDamage}${defenderDefeated ? ' | defeated' : ''}`;
 }

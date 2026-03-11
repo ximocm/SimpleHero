@@ -5,7 +5,7 @@ Build the first playable combat slice on top of the existing traversal and hero 
 - Turn-based combat state layered onto the current dungeon flow.
 - Deterministic enemy encounters in combat rooms.
 - Basic attacks for heroes and enemies using the formulas in `docs/balance.md`.
-- Room-clear rewards and real run-gold state.
+- Room-clear progression without combat rewards.
 - Minimal combat UI that makes turn order and action availability obvious.
 
 ## Phase 2 Gate
@@ -26,7 +26,6 @@ Build the first playable combat slice on top of the existing traversal and hero 
 ## Pre-Combat Alignment
 Before implementing balance-sensitive combat logic:
 - Normalize runtime weapon and armor stats in `src/items/*.ts` to match `docs/items.md`, or explicitly update the docs to match the chosen values.
-- Convert placeholder `PARTY_GOLD` UI state into real mutable run state owned by game systems and persistence.
 - Decide whether starter heroes begin with auto-equipped default loadouts or must equip from starting inventory before first combat.
 
 ## Phase 3 Scope
@@ -36,18 +35,18 @@ Before implementing balance-sensitive combat logic:
   - `combat`
   - `treasure`
   - `exit`
-- Add per-room encounter state:
-  - `unstarted`
-  - `active`
-  - `cleared`
-- Entering a combat room for the first time starts its encounter.
+- Add explicit per-room encounter state instead of relying on traversal-only room data.
+- Combat rooms own encounter state with:
+  - `enemyIds`
+  - `isCleared`
+- Entering a combat room starts or resumes its encounter state.
 - Exits in an active combat room stay blocked until the encounter is cleared.
 - Treasure and exit rooms do not spawn enemies in this phase.
 
 ### 2. Enemy Runtime State
 - Add enemy runtime data for active combat rooms:
   - `id`
-  - `type`
+  - `kind`
   - `roomId`
   - `tile`
   - `hp`, `maxHp`
@@ -56,8 +55,7 @@ Before implementing balance-sensitive combat logic:
   - `attackDice`
   - `damage`
   - `defenseDiceBonus`
-  - `goldReward`
-  - `isDefeated`
+  - turn status effects
 - Implement only the locked MVP enemies from `docs/enemies.md`:
   - `Skeleton Sword`
   - `Skeleton Archer`
@@ -70,15 +68,15 @@ Before implementing balance-sensitive combat logic:
   2. Enemy phase
   3. Round cleanup
 - During the hero phase:
-  - Heroes act one at a time.
-  - The active hero panel drives which hero is currently selected when eligible.
-  - Each hero gets:
+  - The player may switch between living heroes in the current room in any order.
+  - The active hero panel drives which hero is currently selected.
+  - Each living hero gets:
     - movement up to `Final Movement`
     - `1 Attack Slot`
     - `2 Action Points`
-  - A hero can end their turn early.
-- A hero that has no remaining legal actions is treated as done for the round.
-- After all living heroes are done, the enemy phase resolves automatically.
+  - Heroes keep their own remaining resources for the whole hero phase.
+- Pressing `End Turn` hands control to the enemy phase.
+- After the enemy phase resolves automatically, a new hero phase starts and refreshes hero resources.
 
 ### 4. Basic Attack Resolution
 - Implement only basic attacks in this phase.
@@ -93,7 +91,7 @@ Before implementing balance-sensitive combat logic:
   8. Apply HP loss.
   9. Consume attack slot.
 - Range is determined by equipped weapon.
-- If no valid weapon is equipped, a hero cannot perform a basic attack unless an explicit fallback attack is defined.
+- If no valid weapon is equipped, a hero uses the explicit fallback unarmed attack.
 - Defense dice must include:
   - base `1`
   - armor bonus
@@ -120,9 +118,9 @@ Before implementing balance-sensitive combat logic:
 - Enemy decisions should break ties deterministically so autosave restore produces the same outcome.
 
 ### 7. Rewards and Run State
-- Clearing a combat room awards the sum of defeated enemy gold rewards to the current run.
-- Run gold must be visible in the existing right-side HUD.
-- Run gold must persist in autosave snapshots.
+- Clearing a combat room only marks it cleared and unblocks traversal.
+- Combat rooms do not award gold or items.
+- Treasure/chest rooms are the only reward source in MVP.
 - A cleared combat room stays cleared after reload and does not respawn enemies.
 
 ### 8. Combat UI
@@ -141,27 +139,27 @@ Before implementing balance-sensitive combat logic:
 ## Acceptance Criteria
 1. Entering a combat room spawns a deterministic valid enemy encounter exactly once.
 2. Active combat blocks room exit transitions until all enemies are defeated.
-3. Hero turns enforce movement, attack-slot, and action-point limits.
+3. The hero phase enforces per-hero movement, attack-slot, and action-point limits.
 4. Basic attack damage matches the formulas in `docs/balance.md`.
 5. Enemy turns resolve automatically and follow the documented target priorities.
 6. Defeated enemies are removed immediately and do not act again.
-7. Clearing a combat room awards gold to the run and the gold survives reload.
+7. Clearing a combat room only updates encounter-clear state and traversal gating.
 8. Cleared combat rooms remain cleared after autosave restore.
 9. Existing non-combat traversal, path preview, and character panels remain functional outside combat.
 10. No two living units occupy the same tile at any time.
 
 ## Technical Breakdown
 - `src/data/dungeonTypes.ts`
-  - Add room kind, encounter state, run-gold state, and enemy runtime types.
+  - Add room kind, encounter state, and enemy runtime types.
 - `src/systems/dungeonStateSystem.ts`
   - Assign deterministic room kinds and persist encounter lifecycle.
 - `src/systems/gameSystem.ts`
   - Coordinate mode switching between traversal and combat.
   - Expose combat-ready UI selectors.
 - `src/systems/partySystem.ts`
-  - Add per-turn hero budgets and turn reset helpers.
+  - Add per-hero phase budgets and turn reset helpers.
 - `src/systems/persistenceSystem.ts`
-  - Bump snapshot schema for run gold, room encounter state, and enemies.
+  - Bump snapshot schema for room encounter state and enemies.
 - `src/main.ts`
   - Add combat HUD, end-turn control, enemy rendering, and combat input routing.
 - New suggested modules:
@@ -174,22 +172,21 @@ Before implementing balance-sensitive combat logic:
 - Combat state can overload `src/main.ts` if rendering and rules stay too coupled.
 - Existing autosave restore must remain deterministic once enemy turns are introduced.
 - Item-stat mismatches between docs and runtime code will create confusing balance regressions if left unresolved.
-- Turn-order UX can become unclear if end-turn state is not explicit in the HUD.
+- Hero-phase UX can become unclear if end-turn state is not explicit in the HUD.
 
 ## Out of Scope for Phase 3
 - Class skills (`Power Strike`, `Dash`, `Spellcast`).
 - Mage spells (`Heal`, `Fireball`, `Ice`).
 - Consumable use in combat.
 - Loot drops and treasure-room interaction beyond room-kind scaffolding.
-- Account-level persistent gold outside the current run.
 - Animation polish, VFX, and audio feedback.
 
 ## Milestones
 1. **M3.1 Data alignment + state scaffolding**
-  - Normalize item stats, add room kinds, add combat/run-gold data contracts.
+  - Normalize item stats, add room kinds, add encounter/combat data contracts.
 2. **M3.2 Hero combat loop**
-  - Turn budgets, end-turn flow, basic hero attacks, combat HUD.
+  - Hero-phase budgets, end-turn flow, basic hero attacks, combat HUD.
 3. **M3.3 Enemy encounters**
-  - Enemy spawning, AI, room-clear logic, reward payout.
+  - Enemy spawning, AI, and room-clear logic.
 4. **M3.4 Persistence + validation**
   - Autosave schema update, reload safety, acceptance checklist pass.

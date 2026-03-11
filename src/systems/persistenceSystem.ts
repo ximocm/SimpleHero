@@ -10,6 +10,7 @@ import type {
   RoomData,
   RoomEncounterState,
   RoomType,
+  RunState,
 } from '../data/dungeonTypes.js';
 import type { InventoryEntry } from '../items/inventory.js';
 import { ITEM_DEFINITIONS } from '../items/items.js';
@@ -98,13 +99,27 @@ interface PersistedGameStateV6 {
   lastCombatRoll: CombatRollSnapshot | null;
 }
 
+interface PersistedGameStateV7 {
+  version: 7;
+  savedAt: number;
+  dungeon: PersistedDungeonState;
+  party: PersistedPartyStateV2;
+  turn: CombatTurnState | null;
+  combatRngState: number;
+  attackModeHeroId: string | null;
+  recentCombatLog: string[];
+  lastCombatRoll: CombatRollSnapshot | null;
+  runState: RunState;
+}
+
 type PersistedSnapshot =
   | PersistedGameStateV1
   | PersistedGameStateV2
   | PersistedGameStateV3
   | PersistedGameStateV4
   | PersistedGameStateV5
-  | PersistedGameStateV6;
+  | PersistedGameStateV6
+  | PersistedGameStateV7;
 
 /**
  * Loads and restores game state from localStorage, if available and valid.
@@ -116,7 +131,7 @@ export function loadPersistedGameState(): GameState | null {
 
   try {
     const data = JSON.parse(raw) as PersistedSnapshot;
-    if (data.version !== 1 && data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5 && data.version !== 6) return null;
+    if (data.version !== 1 && data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5 && data.version !== 6 && data.version !== 7) return null;
     return restoreFromSnapshot(data);
   } catch {
     return null;
@@ -129,8 +144,8 @@ export function loadPersistedGameState(): GameState | null {
  * @returns Nothing.
  */
 export function persistGameState(state: GameState): void {
-  const snapshot: PersistedGameStateV6 = {
-    version: 6,
+  const snapshot: PersistedGameStateV7 = {
+    version: 7,
     savedAt: Date.now(),
     dungeon: {
       seed: state.dungeon.seed,
@@ -176,6 +191,7 @@ export function persistGameState(state: GameState): void {
           blockedHits: [...state.lastCombatRoll.blockedHits],
         }
       : null,
+    runState: state.runState,
   };
 
   localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
@@ -325,6 +341,7 @@ function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
       ? snapshot.recentCombatLog.filter((entry): entry is string => typeof entry === 'string').slice(0, 6)
       : [];
   state.lastCombatRoll = 'lastCombatRoll' in snapshot ? sanitizeCombatRoll(snapshot.lastCombatRoll) : null;
+  state.runState = sanitizeRunState('runState' in snapshot ? snapshot.runState : 'active');
   syncCombatTurnState(state);
 
   return state;
@@ -376,6 +393,11 @@ function sanitizeRoomData(room: RoomData, fallback: RoomData | undefined): RoomD
 function sanitizeRoomType(value: unknown, fallback: RoomType): RoomType {
   if (value === 'combat' || value === 'treasure' || value === 'exit') return value;
   return fallback;
+}
+
+function sanitizeRunState(value: unknown): RunState {
+  if (value === 'active' || value === 'won' || value === 'lost') return value;
+  return 'active';
 }
 
 function sanitizeEncounter(

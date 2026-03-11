@@ -30,6 +30,12 @@ export interface TurnBannerView {
  * @returns Nothing.
  */
 export function syncCombatTurnState(state: GameState): void {
+  if (state.runState !== 'active') {
+    state.turn = null;
+    state.turnAutomationReadyAt = null;
+    state.attackModeHeroId = null;
+    return;
+  }
   const room = state.dungeon.rooms.get(state.dungeon.currentRoomId);
   if (!room || !shouldRunCombatTurns(room)) {
     state.turn = null;
@@ -54,6 +60,7 @@ export function syncCombatTurnState(state: GameState): void {
  * @returns `true` when state changed.
  */
 export function advanceAutomatedTurns(state: GameState, nowMs: number): boolean {
+  if (state.runState !== 'active') return false;
   const turn = state.turn;
   if (!turn || turn.phase !== 'enemies') return false;
 
@@ -89,6 +96,7 @@ export function advanceAutomatedTurns(state: GameState, nowMs: number): boolean 
  * @returns Nothing.
  */
 export function passTurn(state: GameState): void {
+  if (state.runState !== 'active') return;
   const turn = state.turn;
   if (!turn || turn.phase !== 'heroes') return;
   beginEnemyPhase(state);
@@ -101,6 +109,9 @@ export function passTurn(state: GameState): void {
  * @returns `true` when that hero belongs to the active heroes phase.
  */
 export function canHeroActNow(state: GameState, heroId: string): boolean {
+  if (state.runState !== 'active') return false;
+  const hero = state.party.heroes.find((candidate) => candidate.id === heroId);
+  if (!hero || hero.hp <= 0) return false;
   const turn = state.turn;
   if (!turn) return true;
   if (turn.phase !== 'heroes') return false;
@@ -156,7 +167,7 @@ export function consumeHeroActionPoint(state: GameState, heroId: string): number
  */
 export function getCurrentHeroTurnResources(state: GameState): HeroTurnResources | null {
   const hero = state.party.heroes[state.party.activeHeroIndex];
-  if (!hero) return null;
+  if (!hero || hero.hp <= 0) return null;
   const resources = getHeroResourcesRef(state, hero.id);
   return resources ? { ...resources } : null;
 }

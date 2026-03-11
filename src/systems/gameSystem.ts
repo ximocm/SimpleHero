@@ -10,6 +10,7 @@ import type {
   RoomData,
   RoomEncounterState,
   RoomType,
+  RunState,
 } from '../data/dungeonTypes.js';
 import { isWalkable, TileType } from '../data/tileTypes.js';
 import {
@@ -37,6 +38,7 @@ import {
 export interface GameState {
   dungeon: DungeonState;
   party: PartyState;
+  runState: RunState;
   hoverPath: Coord[];
   movingPath: Coord[];
   readyByHeroId: Map<string, Direction>;
@@ -66,6 +68,7 @@ export interface HeroPanelView {
   roomId: string;
   floorNumber: number;
   isActive: boolean;
+  isDefeated: boolean;
   isReadyAtExit: boolean;
   movementRemaining: number | null;
   actionPointsRemaining: number | null;
@@ -111,6 +114,7 @@ export function createGameState(seed: number): GameState {
   const state: GameState = {
     dungeon,
     party,
+    runState: 'active',
     hoverPath: [],
     movingPath: [],
     readyByHeroId: new Map(),
@@ -144,6 +148,7 @@ export function getCurrentRoom(state: GameState): RoomData {
  * @returns Nothing.
  */
 export function setActiveHeroIndex(state: GameState, index: number): void {
+  if (state.runState !== 'active') return;
   const nextHero = state.party.heroes[index];
   if (!nextHero) return;
   if (!canSelectHeroThisPhase(state, nextHero.id)) return;
@@ -165,6 +170,10 @@ export function setActiveHeroIndex(state: GameState, index: number): void {
  * @returns Nothing.
  */
 export function updateHoverPath(state: GameState, target: Coord): void {
+  if (state.runState !== 'active') {
+    state.hoverPath = [];
+    return;
+  }
   const room = getCurrentRoom(state);
   const hero = getActiveHero(state.party);
   if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) {
@@ -190,6 +199,7 @@ export function updateHoverPath(state: GameState, target: Coord): void {
  * @returns Nothing.
  */
 export function commitMoveFromHover(state: GameState): void {
+  if (state.runState !== 'active') return;
   const hero = getActiveHero(state.party);
   if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) return;
   if (state.attackModeHeroId) return;
@@ -204,6 +214,7 @@ export function commitMoveFromHover(state: GameState): void {
  * @returns `true` when hero moved this tick, else `false`.
  */
 export function stepMovement(state: GameState): boolean {
+  if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
   if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) return false;
   if (state.attackModeHeroId) return false;
@@ -308,7 +319,9 @@ function maybeTransitionRoom(state: GameState): void {
     return;
   }
 
-  if (state.readyByHeroId.size !== 3) return;
+  const livingHeroes = state.party.heroes.filter((hero) => hero.hp > 0);
+  if (livingHeroes.length === 0) return;
+  if (!livingHeroes.every((hero) => state.readyByHeroId.has(hero.id))) return;
 
   const directions = Array.from(state.readyByHeroId.values());
   const direction = directions[0];
@@ -337,6 +350,11 @@ function maybeTransitionRoom(state: GameState): void {
   state.hoverPath = [];
   state.movingPath = [];
   syncCombatTurnState(state);
+  if (nextRoom.roomType === 'exit' && state.party.heroes.some((hero) => hero.hp > 0)) {
+    setRunState(state, 'won');
+    state.recentCombatLog.unshift('Run complete: the party reached the exit room.');
+    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  }
 }
 
 /**
@@ -410,6 +428,7 @@ function isTileOccupiedByOtherHero(
   return state.party.heroes.some(
     (hero) =>
       hero.id !== currentHeroId &&
+      hero.hp > 0 &&
       !state.readyByHeroId.has(hero.id) &&
       hero.roomId === roomId &&
       hero.tile.x === coord.x &&
@@ -499,6 +518,7 @@ export function getHeroPanelViews(state: GameState): HeroPanelView[] {
       roomId: hero.roomId,
       floorNumber: state.dungeon.floorByRoomId.get(hero.roomId) ?? 1,
       isActive: index === state.party.activeHeroIndex,
+      isDefeated: hero.hp <= 0,
       isReadyAtExit: state.readyByHeroId.has(hero.id),
       movementRemaining: turnResources?.movementRemaining ?? null,
       actionPointsRemaining: turnResources?.actionPointsRemaining ?? null,
@@ -543,6 +563,7 @@ export function getCurrentRoomEnemyViews(state: GameState): EnemyBoardView[] {
  * @returns `true` when attack mode is now active.
  */
 export function toggleAttackMode(state: GameState): boolean {
+  if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
   if (!canHeroActNow(state, hero.id)) return false;
   const resources = getCurrentHeroTurnResources(state);
@@ -562,6 +583,7 @@ export function toggleAttackMode(state: GameState): boolean {
  * @returns `true` when an attack was performed.
  */
 export function tryHeroAttackAtTile(state: GameState, target: Coord): boolean {
+  if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
   if (state.attackModeHeroId !== hero.id) return false;
 
@@ -591,9 +613,10 @@ export function tryHeroAttackAtTile(state: GameState, target: Coord): boolean {
  * @returns `true` when the target is in range and the slot is available.
  */
 export function canHeroBasicAttackEnemy(state: GameState, heroId: string, enemyId: string): boolean {
+  if (state.runState !== 'active') return false;
   const hero = state.party.heroes.find((candidate) => candidate.id === heroId);
   const enemy = getCurrentRoomEnemies(state).find((candidate) => candidate.id === enemyId && candidate.hp > 0);
-  if (!hero || !enemy) return false;
+  if (!hero || hero.hp <= 0 || !enemy) return false;
   if (!canHeroActNow(state, heroId)) return false;
 
   const resources = state.turn?.heroResourcesById[heroId];
@@ -608,6 +631,7 @@ export function canHeroBasicAttackEnemy(state: GameState, heroId: string, enemyI
  * @returns `true` when a relic consumable can be used now.
  */
 export function canUseActiveHeroConsumable(state: GameState): boolean {
+  if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
   if (state.turn) {
     if (!canHeroActNow(state, hero.id)) return false;
@@ -645,6 +669,7 @@ export function getActiveHeroConsumableActionView(state: GameState): ConsumableA
  * @returns `true` when item use mode is now active.
  */
 export function toggleItemUseMode(state: GameState): boolean {
+  if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
   if (!canUseActiveHeroConsumable(state)) return false;
   state.attackModeHeroId = null;
@@ -661,6 +686,7 @@ export function toggleItemUseMode(state: GameState): boolean {
  * @returns `true` when an item was used.
  */
 export function useActiveHeroBackpackConsumable(state: GameState, itemId: string): boolean {
+  if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
   if (state.itemUseModeHeroId !== hero.id) return false;
   if (!canUseActiveHeroConsumable(state)) return false;
@@ -727,6 +753,30 @@ export function getRoomEncounter(room: RoomData): RoomEncounterState | null {
 function isTileOccupiedByEnemy(state: GameState, roomId: string, coord: Coord): boolean {
   const roomEnemies = state.dungeon.enemiesByRoomId.get(roomId) ?? [];
   return roomEnemies.some((enemy) => enemy.hp > 0 && sameCoord(enemy.tile, coord));
+}
+
+export function setRunState(state: GameState, next: RunState): void {
+  state.runState = next;
+  if (next !== 'active') {
+    state.turn = null;
+    state.turnAutomationReadyAt = null;
+    state.hoverPath = [];
+    state.movingPath = [];
+    state.attackModeHeroId = null;
+    state.itemUseModeHeroId = null;
+    state.readyByHeroId.clear();
+  }
+  ensureActiveHeroIsLiving(state);
+}
+
+export function ensureActiveHeroIsLiving(state: GameState): void {
+  const current = state.party.heroes[state.party.activeHeroIndex];
+  if (current && current.hp > 0) return;
+
+  const nextIndex = state.party.heroes.findIndex((hero) => hero.hp > 0);
+  if (nextIndex >= 0) {
+    state.party.activeHeroIndex = nextIndex;
+  }
 }
 
 function formatCombatLogEntry(

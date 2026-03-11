@@ -7,6 +7,7 @@ export type RoomType = 'combat' | 'treasure' | 'exit';
 export type EnemyKind = 'skeleton-sword' | 'skeleton-archer';
 export type TurnUnitKind = 'hero' | 'enemy';
 export type CombatPhase = 'heroes' | 'enemies';
+export type RunState = 'active' | 'won' | 'lost';
 
 export interface Coord {
   x: number;

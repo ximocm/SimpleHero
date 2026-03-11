@@ -56,7 +56,9 @@ export function performEnemyAttack(state: GameState, enemy: EnemyState, hero: He
   );
 
   hero.hp = Math.max(0, hero.hp - roll.finalDamage);
-  return { roll, defenderDefeated: hero.hp === 0 };
+  const defeated = hero.hp === 0;
+  if (defeated) handleHeroDefeat(state, hero);
+  return { roll, defenderDefeated: defeated };
 }
 
 /**
@@ -110,6 +112,33 @@ function getEquippedWeapon(hero: HeroState): { range: number; attackDice: number
   return weaponId ? WEAPON_DEFINITIONS[weaponId] : UNARMED_ATTACK;
 }
 
+export function getHeroAttackProfile(hero: HeroState): {
+  label: string;
+  range: number;
+  attackDice: number;
+  damage: number;
+} {
+  const candidates = [hero.equipment.rightHand, hero.equipment.leftHand].filter(
+    (itemId): itemId is keyof typeof WEAPON_DEFINITIONS =>
+      typeof itemId === 'string' && Object.prototype.hasOwnProperty.call(WEAPON_DEFINITIONS, itemId),
+  );
+  const weaponId = candidates[0];
+  if (!weaponId) {
+    return {
+      label: 'Unarmed',
+      ...UNARMED_ATTACK,
+    };
+  }
+
+  const weapon = WEAPON_DEFINITIONS[weaponId];
+  return {
+    label: weapon.name,
+    range: weapon.range,
+    attackDice: weapon.attackDice,
+    damage: weapon.damage,
+  };
+}
+
 function getHeroDefenseDiceBonus(hero: HeroState): number {
   let bonus = 0;
   if (hero.equipment.armor && Object.prototype.hasOwnProperty.call(ARMOR_DEFINITIONS, hero.equipment.armor)) {
@@ -145,5 +174,33 @@ function handleEnemyDefeat(state: GameState, enemy: EnemyState): void {
   if (room.encounter) {
     room.encounter.enemyIds = roomEnemies.filter((candidate) => candidate.hp > 0).map((candidate) => candidate.id);
     room.encounter.isCleared = room.encounter.enemyIds.length === 0;
+  }
+}
+
+function handleHeroDefeat(state: GameState, hero: HeroState): void {
+  state.readyByHeroId.delete(hero.id);
+  ensureLivingHeroSelected(state);
+
+  if (state.party.heroes.every((candidate) => candidate.hp <= 0)) {
+    state.runState = 'lost';
+    state.turn = null;
+    state.turnAutomationReadyAt = null;
+    state.hoverPath = [];
+    state.movingPath = [];
+    state.attackModeHeroId = null;
+    state.itemUseModeHeroId = null;
+    state.readyByHeroId.clear();
+    state.recentCombatLog.unshift('Run failed: all heroes were defeated.');
+    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  }
+}
+
+function ensureLivingHeroSelected(state: GameState): void {
+  const current = state.party.heroes[state.party.activeHeroIndex];
+  if (current && current.hp > 0) return;
+
+  const nextIndex = state.party.heroes.findIndex((candidate) => candidate.hp > 0);
+  if (nextIndex >= 0) {
+    state.party.activeHeroIndex = nextIndex;
   }
 }

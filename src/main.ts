@@ -11,6 +11,7 @@ import {
   getCurrentRoomEnemyViews,
   getCurrentRoomEnemies,
   getCurrentFloorNumber,
+  ensureActiveHeroIsLiving,
   getHeroPanelViews,
   getCurrentRoom,
   getCurrentRoomCoordId,
@@ -24,6 +25,7 @@ import {
   updateHoverPath,
   useActiveHeroBackpackConsumable,
 } from './systems/gameSystem.js';
+import { getHeroAttackProfile } from './systems/combatSystem.js';
 import { advanceAutomatedTurns, getTurnBannerView, isCurrentTurnHero, passTurn } from './systems/turnSystem.js';
 import {
   clearPersistedGameState,
@@ -41,8 +43,6 @@ const CANVAS_HEIGHT = 720;
 const HUD_HEIGHT = 64;
 const MOVE_STEP_INTERVAL_MS = 180;
 const SHOW_FULL_DUNGEON_MAP = true;
-const PARTY_GOLD = 0;
-
 const state = loadPersistedGameState() ?? createGameState(Date.now());
 const partyInventory = loadPersistedPartyInventory() ?? createStarterPartyInventory();
 const itemById = new Map<string, (typeof ITEM_DEFINITIONS)[number]>(
@@ -359,6 +359,10 @@ canvas.addEventListener('mousemove', (event) => {
     state.hoverPath = [];
     return;
   }
+  if (state.runState !== 'active') {
+    state.hoverPath = [];
+    return;
+  }
 
   const tile = getTileAt(room, target);
   if (tile === TileType.VOID_BLACK) {
@@ -383,6 +387,7 @@ canvas.addEventListener('click', (event) => {
   );
 
   if (!inBounds(target, room.width, room.height)) return;
+  if (state.runState !== 'active') return;
   if (tryHeroAttackAtTile(state, target)) {
     persistAll();
     renderCharacterPanels();
@@ -397,6 +402,7 @@ canvas.addEventListener('click', (event) => {
 });
 
 window.addEventListener('keydown', (event) => {
+  if (state.runState !== 'active' && event.key !== '1' && event.key !== '2' && event.key !== '3') return;
   if (event.key === '1') setActiveHeroIndex(state, 0);
   if (event.key === '2') setActiveHeroIndex(state, 1);
   if (event.key === '3') setActiveHeroIndex(state, 2);
@@ -449,6 +455,7 @@ function draw(): void {
   }
 
   state.party.heroes.forEach((hero, index) => {
+    if (hero.hp <= 0) return;
     if (state.readyByHeroId.has(hero.id)) return;
 
     const cx = offset.x + hero.tile.x * tileSize + tileSize / 2;
@@ -548,8 +555,17 @@ function drawHud(): void {
   const weaponText = getSelectedHeroWeaponSummary();
   const lastRollText = getLastRollSummary();
   status.textContent = `Discovered rooms: ${state.dungeon.discoveredRoomIds.size} | Seed: ${state.dungeon.seed} | Room type: ${encounter.roomType} | Turn: ${turn.activeLabel}${heroResourcesText} | Weapon: ${weaponText}${lastRollText ? ` | ${lastRollText}` : ''}`;
+  if (state.runState === 'won') {
+    status.textContent = `Run won | Reached the exit room with surviving heroes | Weapon: ${weaponText}${lastRollText ? ` | ${lastRollText}` : ''}`;
+  } else if (state.runState === 'lost') {
+    status.textContent = `Run lost | All heroes defeated${lastRollText ? ` | ${lastRollText}` : ''}`;
+  }
   controlsHint.textContent =
-    state.attackModeHeroId
+    state.runState === 'won'
+      ? 'Run complete. Use reset saved state to start a new run.'
+      : state.runState === 'lost'
+        ? 'Run failed. Use reset saved state to start a new run.'
+      : state.attackModeHeroId
       ? 'Attack mode: click a highlighted enemy to attack | 1/2/3 or click card = active hero'
       : state.itemUseModeHeroId
         ? 'Item mode: click a highlighted consumable in the active hero backpack'
@@ -558,15 +574,15 @@ function drawHud(): void {
   const hasAttackTarget =
     state.turn?.phase === 'heroes' &&
     getCurrentRoomEnemies(state).some((enemy) => canHeroBasicAttackEnemy(state, activeHero.id, enemy.id));
-  attackButton.disabled = !turn.isCombatActive || !isCurrentTurnHero(state);
+  attackButton.disabled = state.runState !== 'active' || !turn.isCombatActive || !isCurrentTurnHero(state);
   attackButton.style.opacity = attackButton.disabled ? '0.5' : '1';
   attackButton.textContent = state.attackModeHeroId === activeHero.id ? 'cancel attack' : hasAttackTarget ? 'basic attack' : 'basic attack';
   const consumableAction = getActiveHeroConsumableActionView(state);
-  useItemButton.disabled = !canUseActiveHeroConsumable(state);
+  useItemButton.disabled = state.runState !== 'active' || !canUseActiveHeroConsumable(state);
   useItemButton.style.opacity = useItemButton.disabled ? '0.5' : '1';
   useItemButton.textContent =
     state.itemUseModeHeroId === activeHero.id ? 'cancel item' : 'use item';
-  endTurnButton.disabled = !turn.isCombatActive || !isCurrentTurnHero(state);
+  endTurnButton.disabled = state.runState !== 'active' || !turn.isCombatActive || !isCurrentTurnHero(state);
   endTurnButton.style.opacity = endTurnButton.disabled ? '0.5' : '1';
   endTurnButton.textContent = turn.isCombatActive && isCurrentTurnHero(state) ? 'end heroes turn' : 'enemy turn running';
 }
@@ -574,13 +590,8 @@ function drawHud(): void {
 function getSelectedHeroWeaponSummary(): string {
   const hero = state.party.heroes[state.party.activeHeroIndex];
   if (!hero) return 'none';
-
-  const weaponId = hero.equipment.rightHand ?? hero.equipment.leftHand;
-  if (!weaponId) return 'Unarmed | dice 1 | damage 1 | range 1';
-
-  const weapon = itemById.get(weaponId);
-  if (!weapon || weapon.category !== 'weapon') return weaponId;
-  return `${weapon.name} | dice ${weapon.attackDice} | damage ${weapon.damage} | range ${weapon.range}`;
+  const profile = getHeroAttackProfile(hero);
+  return `${profile.label} | dice ${profile.attackDice} | damage ${profile.damage} | range ${profile.range}`;
 }
 
 function getLastRollSummary(): string {
@@ -636,11 +647,13 @@ function renderCharacterPanels(): void {
   characterPanels.innerHTML = heroes
     .map((hero, index) => {
       const hpPercent = hero.maxHp > 0 ? Math.max(0, Math.min(100, (hero.hp / hero.maxHp) * 100)) : 0;
-      const border = hero.isActive ? '#fbbf24' : 'rgba(148,163,184,0.25)';
-      const badgeLabel = hero.isReadyAtExit ? 'Ready' : hero.isActive ? 'Active' : 'Idle';
-      const badgeColor = hero.isReadyAtExit ? '#22c55e' : hero.isActive ? '#fbbf24' : '#94a3b8';
+      const border = hero.isDefeated ? 'rgba(239,68,68,0.7)' : hero.isActive ? '#fbbf24' : 'rgba(148,163,184,0.25)';
+      const badgeLabel = hero.isDefeated ? 'Defeated' : hero.isReadyAtExit ? 'Ready' : hero.isActive ? 'Active' : 'Idle';
+      const badgeColor = hero.isDefeated ? '#f87171' : hero.isReadyAtExit ? '#22c55e' : hero.isActive ? '#fbbf24' : '#94a3b8';
       const turnEconomy =
-        hero.movementRemaining !== null
+        hero.isDefeated
+          ? 'Defeated'
+          : hero.movementRemaining !== null
           ? `Move ${hero.movementRemaining} · AP ${hero.actionPointsRemaining ?? 0} · Attack ${
               hero.attackSlotAvailable ? 'Ready' : 'Spent'
             }`
@@ -649,7 +662,7 @@ function renderCharacterPanels(): void {
       return `
         <div
           data-hero-index="${index}"
-          style="cursor:pointer; border:1px solid ${border}; min-height:118px; padding:12px; background:rgba(15,23,42,0.55);"
+          style="cursor:${hero.isDefeated ? 'default' : 'pointer'}; border:1px solid ${border}; min-height:118px; padding:12px; background:${hero.isDefeated ? 'rgba(69,10,10,0.45)' : 'rgba(15,23,42,0.55)'};"
         >
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
             <div style="font-size:15px; font-weight:600;">${hero.classLetter} · ${hero.className}</div>
@@ -688,7 +701,7 @@ function renderCharacterPanels(): void {
  * @returns Nothing.
  */
 function renderPartyInventory(): void {
-  goldValue.textContent = `gold: ${PARTY_GOLD}`;
+  goldValue.textContent = 'gold: chest rewards not implemented';
   partyInventoryList.innerHTML = partyInventory
     .map(
       (entry) => `
@@ -1019,6 +1032,7 @@ function facingTriangle(
  */
 function tick(): void {
   const now = performance.now();
+  ensureActiveHeroIsLiving(state);
   const advancedTurn = advanceAutomatedTurns(state, now);
   const moved = now - lastMoveStepAt >= MOVE_STEP_INTERVAL_MS ? stepMovement(state) : false;
   if (moved) {

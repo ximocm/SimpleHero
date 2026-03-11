@@ -96,6 +96,14 @@ export interface ConsumableActionView {
   isAvailable: boolean;
 }
 
+export interface RunSummaryView {
+  result: RunState;
+  seed: number;
+  discoveredRooms: number;
+  floorsReached: number;
+  survivingHeroes: number;
+}
+
 /**
  * Creates the full game state from a seed.
  * @param seed Run seed.
@@ -777,6 +785,21 @@ export function ensureActiveHeroIsLiving(state: GameState): void {
   if (nextIndex >= 0) {
     state.party.activeHeroIndex = nextIndex;
   }
+}
+
+export function getRunSummaryView(state: GameState): RunSummaryView {
+  const highestFloorReached = state.party.heroes.reduce((maxFloor, hero) => {
+    const floor = state.dungeon.floorByRoomId.get(hero.roomId) ?? 1;
+    return Math.max(maxFloor, floor);
+  }, 1);
+
+  return {
+    result: state.runState,
+    seed: state.dungeon.seed,
+    discoveredRooms: state.dungeon.discoveredRoomIds.size,
+    floorsReached: highestFloorReached,
+    survivingHeroes: state.party.heroes.filter((hero) => hero.hp > 0).length,
+  };
 }
 
 function formatCombatLogEntry(

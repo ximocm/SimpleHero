@@ -15,6 +15,7 @@ import {
   getHeroPanelViews,
   getCurrentRoom,
   getCurrentRoomCoordId,
+  getRunSummaryView,
   getTileAt,
   isBackpackConsumableTargetable,
   setActiveHeroIndex,
@@ -30,6 +31,7 @@ import { advanceAutomatedTurns, getTurnBannerView, isCurrentTurnHero, passTurn }
 import {
   clearPersistedGameState,
   clearPersistedPartyInventory,
+  hasPersistedGameState,
   loadPersistedGameState,
   loadPersistedPartyInventory,
   persistGameState,
@@ -37,124 +39,59 @@ import {
 } from './systems/persistenceSystem.js';
 import { inBounds, tileFromCanvas } from './utils/grid.js';
 import { createStarterPartyInventory, ITEM_DEFINITIONS } from './items/index.js';
+import { getAppLayoutHtml, requireContext, requireElement } from './ui/layout.js';
+import {
+  getPauseMenuOverlayHtml,
+  getRunCompleteOverlayHtml,
+  getStartMenuOverlayHtml,
+} from './ui/overlayViews.js';
+import {
+  renderCharacterPanelsHtml,
+  renderCombatLogHtml,
+  renderPartyInventoryHtml,
+} from './ui/sidebarViews.js';
 
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 720;
 const HUD_HEIGHT = 64;
 const MOVE_STEP_INTERVAL_MS = 180;
 const SHOW_FULL_DUNGEON_MAP = true;
-const state = loadPersistedGameState() ?? createGameState(Date.now());
-const partyInventory = loadPersistedPartyInventory() ?? createStarterPartyInventory();
+const SESSION_RESTORE_NAV_TYPE = 'reload';
+
+type AppMode = 'menu' | 'game' | 'run-complete';
+type OverlayMode = 'pause-menu' | null;
+
+const navigationEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+const shouldRestoreOnReload = navigationEntry?.type === SESSION_RESTORE_NAV_TYPE;
+const restoredState = shouldRestoreOnReload ? loadPersistedGameState() : null;
+const restoredInventory = shouldRestoreOnReload ? loadPersistedPartyInventory() : null;
+
+let state = restoredState ?? createGameState(Date.now());
+let partyInventory = restoredInventory ?? createStarterPartyInventory();
+let appMode: AppMode = restoredState ? (restoredState.runState === 'active' ? 'game' : 'run-complete') : 'menu';
+let overlayMode: OverlayMode = null;
 const itemById = new Map<string, (typeof ITEM_DEFINITIONS)[number]>(
   ITEM_DEFINITIONS.map((item) => [item.id, item]),
 );
 let lastMoveStepAt = 0;
-persistAll();
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
   throw new Error('Missing #app root');
 }
-
-/**
- * Queries a required DOM element and throws when missing.
- * @param selector CSS selector for the target element.
- * @returns Matched DOM element.
- */
-function requireElement<T extends Element>(selector: string): T {
-  const element = document.querySelector<T>(selector);
-  if (!element) {
-    throw new Error(`Missing required element: ${selector}`);
-  }
-  return element;
-}
-
-/**
- * Retrieves 2D canvas rendering context.
- * @param canvasElement Canvas element.
- * @returns 2D rendering context.
- */
-function requireContext(canvasElement: HTMLCanvasElement): CanvasRenderingContext2D {
-  const context = canvasElement.getContext('2d');
-  if (!context) {
-    throw new Error('Canvas context unavailable');
-  }
-  return context;
-}
-
-app.innerHTML = `
-  <!-- App Layout -->
-  <div style="display:flex; gap:18px; align-items:flex-start; width:100%; font-family: sans-serif; color:#cbd5e1;">
-    <!-- Left Sidebar: Character Panels -->
-    <div id="characterPanels" style="display:flex; flex-direction:column; gap:10px; width:380px; flex:0 0 380px;"></div>
-
-    <!-- Center: Dungeon View -->
-    <div style="flex:1 1 auto; display:flex; justify-content:center;">
-      <div style="width:${CANVAS_WIDTH}px;">
-        <!-- Main Dungeon Canvas -->
-        <canvas id="gameCanvas" width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" style="background:transparent"></canvas>
-        <!-- Status Line -->
-        <div id="status" style="margin-top:8px; color:#cbd5e1; font-size:14px;"></div>
-        <!-- Controls Hint -->
-        <div id="controlsHint" style="margin-top:8px; color:#94a3b8; font-size:12px;"></div>
-        <!-- Combat Log -->
-        <div style="margin-top:10px; font-size:14px; color:#94a3b8;">combat log</div>
-        <div id="combatLog" style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:#e2e8f0; margin-top:6px;"></div>
-      </div>
-    </div>
-
-    <!-- Right Sidebar: Map and Party Resources -->
-    <div style="display:flex; flex-direction:column; gap:12px; width:280px; flex:0 0 280px;">
-      <!-- Minimap -->
-      <canvas id="minimapCanvas" width="220" height="220" style="background:transparent"></canvas>
-      <!-- Gold + Inventory Panel -->
-      <div style="min-height:420px; padding:14px; background:rgba(15,23,42,0.55);">
-        <button
-          id="resetStateButton"
-          type="button"
-          style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(248,113,113,0.5); background:rgba(127,29,29,0.55); color:#fee2e2; cursor:pointer;"
-        >
-          reset saved state
-        </button>
-        <button
-          id="attackButton"
-          type="button"
-          style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(251,191,36,0.45); background:rgba(120,53,15,0.45); color:#fef3c7; cursor:pointer;"
-        >
-          basic attack
-        </button>
-        <button
-          id="useItemButton"
-          type="button"
-          style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(74,222,128,0.45); background:rgba(20,83,45,0.45); color:#dcfce7; cursor:pointer;"
-        >
-          use item
-        </button>
-        <button
-          id="endTurnButton"
-          type="button"
-          style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(96,165,250,0.45); background:rgba(30,64,175,0.45); color:#dbeafe; cursor:pointer;"
-        >
-          end heroes turn
-        </button>
-        <!-- Gold Section -->
-        <div id="goldValue" style="margin-bottom:12px;">gold: 0</div>
-        <!-- Party Inventory Section -->
-        <div style="font-size:14px; color:#94a3b8; margin-bottom:10px;">party inventory</div>
-        <div id="partyInventoryList" style="display:flex; flex-direction:column; gap:6px;"></div>
-      </div>
-    </div>
-  </div>
-`;
+app.innerHTML = getAppLayoutHtml(CANVAS_WIDTH, CANVAS_HEIGHT);
 
 const canvas = requireElement<HTMLCanvasElement>('#gameCanvas');
 const minimapCanvas = requireElement<HTMLCanvasElement>('#minimapCanvas');
+const gameRoot = requireElement<HTMLDivElement>('#gameRoot');
+const screenOverlay = requireElement<HTMLDivElement>('#screenOverlay');
 const status = requireElement<HTMLDivElement>('#status');
 const controlsHint = requireElement<HTMLDivElement>('#controlsHint');
 const characterPanels = requireElement<HTMLDivElement>('#characterPanels');
 const goldValue = requireElement<HTMLDivElement>('#goldValue');
 const combatLog = requireElement<HTMLDivElement>('#combatLog');
 const partyInventoryList = requireElement<HTMLDivElement>('#partyInventoryList');
+const menuButton = requireElement<HTMLButtonElement>('#menuButton');
 const resetStateButton = requireElement<HTMLButtonElement>('#resetStateButton');
 const attackButton = requireElement<HTMLButtonElement>('#attackButton');
 const useItemButton = requireElement<HTMLButtonElement>('#useItemButton');
@@ -169,7 +106,88 @@ type DragPayload =
   | { source: 'slot'; itemId: string; heroIndex: number; slot: Exclude<EquipSlot, 'backpack'> }
   | { source: 'backpack'; itemId: string; heroIndex: number; backpackIndex: number };
 
+function isGameplayMode(): boolean {
+  return appMode === 'game' && overlayMode === null;
+}
+
+function renderAppMode(): void {
+  gameRoot.style.display = appMode === 'game' ? 'flex' : 'none';
+
+  if (appMode === 'game') {
+    if (overlayMode === 'pause-menu') {
+      screenOverlay.style.display = 'block';
+      screenOverlay.innerHTML = getPauseMenuOverlayHtml();
+      return;
+    }
+
+    screenOverlay.style.display = 'none';
+    screenOverlay.innerHTML = '';
+    return;
+  }
+
+  if (appMode === 'menu') {
+    const hasSave = hasPersistedGameState() && loadPersistedGameState() !== null;
+    screenOverlay.style.display = 'block';
+    screenOverlay.innerHTML = getStartMenuOverlayHtml(hasSave);
+    return;
+  }
+
+  screenOverlay.style.display = 'block';
+  screenOverlay.innerHTML = getRunCompleteOverlayHtml(getRunSummaryView(state));
+}
+
+function startNewGame(): void {
+  if (hasPersistedGameState()) {
+    const confirmed = window.confirm('Replace the current saved run and start a new game?');
+    if (!confirmed) return;
+  }
+
+  state = createGameState(Date.now());
+  partyInventory = createStarterPartyInventory();
+  appMode = 'game';
+  overlayMode = null;
+  lastMoveStepAt = 0;
+  persistAll();
+  renderCharacterPanels();
+  renderPartyInventory();
+  renderCombatLog();
+  renderAppMode();
+}
+
+function loadSavedGame(): void {
+  const loadedState = loadPersistedGameState();
+  if (!loadedState) {
+    renderAppMode();
+    return;
+  }
+
+  state = loadedState;
+  partyInventory = loadPersistedPartyInventory() ?? createStarterPartyInventory();
+  appMode = state.runState === 'active' ? 'game' : 'run-complete';
+  overlayMode = null;
+  lastMoveStepAt = 0;
+  renderCharacterPanels();
+  renderPartyInventory();
+  renderCombatLog();
+  renderAppMode();
+}
+
+function rebootToMenu(): void {
+  clearPersistedGameState();
+  clearPersistedPartyInventory();
+  state = createGameState(Date.now());
+  partyInventory = createStarterPartyInventory();
+  appMode = 'menu';
+  overlayMode = null;
+  lastMoveStepAt = 0;
+  renderCharacterPanels();
+  renderPartyInventory();
+  renderCombatLog();
+  renderAppMode();
+}
+
 characterPanels.addEventListener('click', (event) => {
+  if (!isGameplayMode()) return;
   const target = event.target as HTMLElement | null;
   if (!target) return;
 
@@ -203,6 +221,7 @@ characterPanels.addEventListener('click', (event) => {
 });
 
 characterPanels.addEventListener('dragstart', (event) => {
+  if (!isGameplayMode()) return;
   const target = event.target as HTMLElement | null;
   if (!target) return;
   const draggable = target.closest<HTMLElement>('[data-drag-source]');
@@ -232,6 +251,7 @@ characterPanels.addEventListener('dragstart', (event) => {
 });
 
 characterPanels.addEventListener('dragover', (event) => {
+  if (!isGameplayMode()) return;
   const target = event.target as HTMLElement | null;
   if (!target) return;
   if (!target.closest<HTMLElement>('[data-drop-slot]')) return;
@@ -239,6 +259,7 @@ characterPanels.addEventListener('dragover', (event) => {
 });
 
 characterPanels.addEventListener('drop', (event) => {
+  if (!isGameplayMode()) return;
   const target = event.target as HTMLElement | null;
   if (!target) return;
   const dropZone = target.closest<HTMLElement>('[data-drop-slot]');
@@ -259,6 +280,7 @@ characterPanels.addEventListener('drop', (event) => {
 });
 
 partyInventoryList.addEventListener('dragstart', (event) => {
+  if (!isGameplayMode()) return;
   const target = event.target as HTMLElement | null;
   if (!target) return;
   const draggable = target.closest<HTMLElement>('[data-drag-source="inventory"]');
@@ -272,10 +294,12 @@ partyInventoryList.addEventListener('dragstart', (event) => {
 });
 
 partyInventoryList.addEventListener('dragover', (event) => {
+  if (!isGameplayMode()) return;
   event.preventDefault();
 });
 
 partyInventoryList.addEventListener('drop', (event) => {
+  if (!isGameplayMode()) return;
   event.preventDefault();
   const payload = readDragPayload(event);
   if (!payload) return;
@@ -288,13 +312,18 @@ partyInventoryList.addEventListener('drop', (event) => {
   renderPartyInventory();
 });
 
+menuButton.addEventListener('click', () => {
+  if (!isGameplayMode()) return;
+  overlayMode = 'pause-menu';
+  renderAppMode();
+});
+
 resetStateButton.addEventListener('click', () => {
-  clearPersistedGameState();
-  clearPersistedPartyInventory();
-  window.location.reload();
+  rebootToMenu();
 });
 
 attackButton.addEventListener('click', () => {
+  if (!isGameplayMode()) return;
   toggleAttackMode(state);
   persistAll();
   renderCharacterPanels();
@@ -302,6 +331,7 @@ attackButton.addEventListener('click', () => {
 });
 
 useItemButton.addEventListener('click', () => {
+  if (!isGameplayMode()) return;
   const toggled = toggleItemUseMode(state);
   if (!toggled && !state.itemUseModeHeroId) return;
   persistAll();
@@ -310,10 +340,42 @@ useItemButton.addEventListener('click', () => {
 });
 
 endTurnButton.addEventListener('click', () => {
+  if (!isGameplayMode()) return;
   passTurn(state);
   persistAll();
   renderCharacterPanels();
   renderCombatLog();
+});
+
+screenOverlay.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement | null;
+  const action = target?.closest<HTMLElement>('[data-screen-action]')?.dataset.screenAction;
+  if (!action) return;
+
+  if (action === 'new-game') {
+    startNewGame();
+    return;
+  }
+  if (action === 'load-game') {
+    loadSavedGame();
+    return;
+  }
+  if (action === 'resume-game') {
+    overlayMode = null;
+    renderAppMode();
+    return;
+  }
+  if (action === 'to-main-menu') {
+    overlayMode = null;
+    appMode = 'menu';
+    renderAppMode();
+    return;
+  }
+  if (action === 'back-menu') {
+    overlayMode = null;
+    appMode = 'menu';
+    renderAppMode();
+  }
 });
 
 /**
@@ -343,6 +405,7 @@ function getBoardOffset(tileSize: number): Coord {
 }
 
 canvas.addEventListener('mousemove', (event) => {
+  if (!isGameplayMode()) return;
   const room = getCurrentRoom(state);
   const tileSize = getTileSize();
   const offset = getBoardOffset(tileSize);
@@ -374,6 +437,7 @@ canvas.addEventListener('mousemove', (event) => {
 });
 
 canvas.addEventListener('click', (event) => {
+  if (!isGameplayMode()) return;
   const room = getCurrentRoom(state);
   const tileSize = getTileSize();
   const offset = getBoardOffset(tileSize);
@@ -402,6 +466,7 @@ canvas.addEventListener('click', (event) => {
 });
 
 window.addEventListener('keydown', (event) => {
+  if (!isGameplayMode()) return;
   if (state.runState !== 'active' && event.key !== '1' && event.key !== '2' && event.key !== '3') return;
   if (event.key === '1') setActiveHeroIndex(state, 0);
   if (event.key === '2') setActiveHeroIndex(state, 1);
@@ -643,57 +708,13 @@ function drawMinimap(): void {
  * @returns Nothing.
  */
 function renderCharacterPanels(): void {
-  const heroes = getHeroPanelViews(state);
-  characterPanels.innerHTML = heroes
-    .map((hero, index) => {
-      const hpPercent = hero.maxHp > 0 ? Math.max(0, Math.min(100, (hero.hp / hero.maxHp) * 100)) : 0;
-      const border = hero.isDefeated ? 'rgba(239,68,68,0.7)' : hero.isActive ? '#fbbf24' : 'rgba(148,163,184,0.25)';
-      const badgeLabel = hero.isDefeated ? 'Defeated' : hero.isReadyAtExit ? 'Ready' : hero.isActive ? 'Active' : 'Idle';
-      const badgeColor = hero.isDefeated ? '#f87171' : hero.isReadyAtExit ? '#22c55e' : hero.isActive ? '#fbbf24' : '#94a3b8';
-      const turnEconomy =
-        hero.isDefeated
-          ? 'Defeated'
-          : hero.movementRemaining !== null
-          ? `Move ${hero.movementRemaining} · AP ${hero.actionPointsRemaining ?? 0} · Attack ${
-              hero.attackSlotAvailable ? 'Ready' : 'Spent'
-            }`
-          : 'Move - · AP - · Attack -';
-
-      return `
-        <div
-          data-hero-index="${index}"
-          style="cursor:${hero.isDefeated ? 'default' : 'pointer'}; border:1px solid ${border}; min-height:118px; padding:12px; background:${hero.isDefeated ? 'rgba(69,10,10,0.45)' : 'rgba(15,23,42,0.55)'};"
-        >
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <div style="font-size:15px; font-weight:600;">${hero.classLetter} · ${hero.className}</div>
-            <div style="font-size:12px; color:${badgeColor};">${badgeLabel}</div>
-          </div>
-          <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">${hero.raceName}</div>
-          <div style="font-size:12px; margin-bottom:4px;">HP ${hero.hp}/${hero.maxHp}</div>
-          <div style="height:8px; background:rgba(148,163,184,0.25); margin-bottom:8px;">
-            <div style="width:${hpPercent}%; height:100%; background:#22c55e;"></div>
-          </div>
-          <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;">Body ${hero.body} · Mind ${hero.mind}</div>
-          <div style="font-size:11px; color:#93c5fd; margin-bottom:8px;">${turnEconomy}</div>
-          <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
-            ${renderEquipSlot(index, 'armor', 'A', hero.armor)}
-            ${renderEquipSlot(index, 'leftHand', 'L', hero.leftHand)}
-            ${renderEquipSlot(index, 'rightHand', 'R', hero.rightHand)}
-            ${renderEquipSlot(index, 'relic', 'Rel', hero.relic)}
-          </div>
-          <div
-            data-drop-slot="backpack"
-            data-hero-index="${index}"
-            style="min-height:30px; border:1px dashed rgba(148,163,184,0.4); padding:6px; font-size:11px; color:#cbd5e1; margin-bottom:2px;"
-          >
-            <div style="color:#94a3b8; margin-bottom:4px;">Backpack (${hero.backpackCount})</div>
-            ${renderBackpackItems(index)}
-          </div>
-          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Floor ${hero.floorNumber} · Room ${hero.roomId}</div>
-        </div>
-      `;
-    })
-    .join('');
+  characterPanels.innerHTML = renderCharacterPanelsHtml({
+    heroes: getHeroPanelViews(state),
+    heroStates: state.party.heroes,
+    itemById,
+    isBackpackConsumableTargetable: (heroId, itemId) => isBackpackConsumableTargetable(state, heroId, itemId),
+    getItemTooltip,
+  });
 }
 
 /**
@@ -702,95 +723,11 @@ function renderCharacterPanels(): void {
  */
 function renderPartyInventory(): void {
   goldValue.textContent = 'gold: chest rewards not implemented';
-  partyInventoryList.innerHTML = partyInventory
-    .map(
-      (entry) => `
-        <div
-          data-drag-source="inventory"
-          data-item-id="${entry.itemId}"
-          draggable="true"
-          title="${escapeAttr(getItemTooltip(entry.itemId))}"
-          style="display:flex; align-items:center; gap:10px; font-size:14px; cursor:grab;"
-        >
-          <img
-            src="/${entry.file}"
-            alt="${entry.name}"
-            width="34"
-            height="34"
-            style="image-rendering:pixelated; background:rgba(148,163,184,0.18); border:1px solid rgba(148,163,184,0.35);"
-          />
-          <span style="flex:1;">${entry.name}</span>
-        </div>
-      `,
-    )
-    .join('');
+  partyInventoryList.innerHTML = renderPartyInventoryHtml(partyInventory, getItemTooltip);
 }
 
 function renderCombatLog(): void {
-  if (state.recentCombatLog.length === 0) {
-    combatLog.innerHTML = '<div style="color:#64748b;">No combat rolls yet</div>';
-    return;
-  }
-
-  combatLog.innerHTML = state.recentCombatLog
-    .map(
-      (entry) =>
-        `<div style="padding:6px; background:rgba(15,23,42,0.45); border:1px solid rgba(148,163,184,0.15);">${entry}</div>`,
-    )
-    .join('');
-}
-
-function renderEquipSlot(
-  heroIndex: number,
-  slot: Exclude<EquipSlot, 'backpack'>,
-  label: string,
-  itemId: string | null,
-): string {
-  const item = itemId ? itemById.get(itemId) : null;
-  const dragAttrs = itemId
-    ? `data-drag-source="slot" data-item-id="${itemId}" data-hero-index="${heroIndex}" data-slot="${slot}" draggable="true" style="cursor:grab; display:inline-block;"`
-    : 'style="display:inline-block;"';
-  const slotContent = itemId && item
-    ? `<img src="/${item.file}" alt="${item.name}" width="22" height="22" title="${escapeAttr(
-        getItemTooltip(itemId),
-      )}" style="image-rendering:pixelated; border:1px solid rgba(148,163,184,0.35); background:rgba(148,163,184,0.14);" />`
-    : `<span style="font-size:11px; color:#64748b;">-</span>`;
-
-  return `
-    <div
-      data-drop-slot="${slot}"
-      data-hero-index="${heroIndex}"
-      style="min-height:30px; border:1px dashed rgba(148,163,184,0.4); padding:5px; font-size:10px; color:#94a3b8;"
-    >
-      <div>${label}</div>
-      <div ${dragAttrs}>${slotContent}</div>
-    </div>
-  `;
-}
-
-function renderBackpackItems(heroIndex: number): string {
-  const hero = state.party.heroes[heroIndex];
-  if (!hero || hero.equipment.backpack.length === 0) {
-    return '<span style="color:#64748b;">Drop item here</span>';
-  }
-
-  return hero.equipment.backpack
-    .map((itemId, backpackIndex) => {
-      const item = itemById.get(itemId);
-      if (!item) return '';
-      const hero = state.party.heroes[heroIndex];
-      const isTargetable = hero ? isBackpackConsumableTargetable(state, hero.id, itemId) : false;
-      return `<span data-drag-source="backpack" data-item-id="${itemId}" data-hero-index="${heroIndex}" data-backpack-index="${backpackIndex}" draggable="true" title="${escapeAttr(
-        getItemTooltip(itemId),
-      )}" data-backpack-item-id="${itemId}" style="display:inline-block; margin-right:6px; cursor:${
-        isTargetable ? 'pointer' : 'grab'
-      };"><img src="/${
-        item.file
-      }" alt="${item.name}" width="20" height="20" style="image-rendering:pixelated; border:1px solid ${
-        isTargetable ? 'rgba(74,222,128,0.9)' : 'rgba(148,163,184,0.35)'
-      }; background:${isTargetable ? 'rgba(20,83,45,0.45)' : 'rgba(148,163,184,0.14)'};" /></span>`;
-    })
-    .join('');
+  combatLog.innerHTML = renderCombatLogHtml(state.recentCombatLog);
 }
 
 function readDragPayload(event: DragEvent): DragPayload | null {
@@ -975,15 +912,6 @@ function getItemTooltip(itemId: string): string {
   return `${item.name}\nEffect: ${item.effect}\nValue: ${item.value}`;
 }
 
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
 /**
  * Computes triangle vertices used as hero facing indicator.
  * @param cx Hero center x.
@@ -1031,34 +959,46 @@ function facingTriangle(
  * @returns Nothing.
  */
 function tick(): void {
-  const now = performance.now();
-  ensureActiveHeroIsLiving(state);
-  const advancedTurn = advanceAutomatedTurns(state, now);
-  const moved = now - lastMoveStepAt >= MOVE_STEP_INTERVAL_MS ? stepMovement(state) : false;
-  if (moved) {
-    lastMoveStepAt = now;
-  }
-  if (advancedTurn || moved) {
-    persistAll();
-    renderCharacterPanels();
-    renderPartyInventory();
-    renderCombatLog();
+  if (appMode === 'game' && overlayMode === null) {
+    const now = performance.now();
+    ensureActiveHeroIsLiving(state);
+    const advancedTurn = advanceAutomatedTurns(state, now);
+    const moved = now - lastMoveStepAt >= MOVE_STEP_INTERVAL_MS ? stepMovement(state) : false;
+    if (moved) {
+      lastMoveStepAt = now;
+    }
+    if (advancedTurn || moved) {
+      persistAll();
+      renderCharacterPanels();
+      renderPartyInventory();
+      renderCombatLog();
+    }
+    if (state.runState !== 'active') {
+      appMode = 'run-complete';
+      persistAll();
+      renderAppMode();
+    }
   }
   draw();
   requestAnimationFrame(tick);
 }
 
 window.setInterval(() => {
-  persistAll();
+  if (appMode !== 'menu') {
+    persistAll();
+  }
 }, 3000);
 
 window.addEventListener('beforeunload', () => {
-  persistAll();
+  if (appMode !== 'menu') {
+    persistAll();
+  }
 });
 
 renderCharacterPanels();
 renderPartyInventory();
 renderCombatLog();
+renderAppMode();
 tick();
 
 /**
@@ -1066,6 +1006,7 @@ tick();
  * @returns Nothing.
  */
 function persistAll(): void {
+  if (appMode === 'menu') return;
   persistGameState(state);
   persistPartyInventory(partyInventory);
 }

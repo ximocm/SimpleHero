@@ -139,6 +139,14 @@ export function loadPersistedGameState(): GameState | null {
 }
 
 /**
+ * Returns whether any autosave snapshot exists in localStorage.
+ * @returns `true` when a snapshot key is present.
+ */
+export function hasPersistedGameState(): boolean {
+  return localStorage.getItem(SAVE_KEY) !== null;
+}
+
+/**
  * Persists current game state to localStorage.
  * @param state Game state to persist.
  * @returns Nothing.

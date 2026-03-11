@@ -480,7 +480,6 @@ function sanitizeEnemy(
     attackDice: Math.max(1, toInt(value?.attackDice, base?.attackDice ?? 1)),
     damage: Math.max(0, toInt(value?.damage, base?.damage ?? 0)),
     defenseDiceBonus: Math.max(0, toInt(value?.defenseDiceBonus, base?.defenseDiceBonus ?? 0)),
-    goldReward: Math.max(0, toInt(value?.goldReward, base?.goldReward ?? 0)),
     statusEffects: {
       rootedTurns: Math.max(0, toInt(value?.statusEffects?.rootedTurns, base?.statusEffects.rootedTurns ?? 0)),
     },

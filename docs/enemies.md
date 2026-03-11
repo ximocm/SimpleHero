@@ -1,7 +1,7 @@
 # Enemies - MVP Spec
 
 ## Purpose
-Define concrete enemy units for MVP combat, including stats, behavior, rewards, and room appearance rules.
+Define concrete enemy units for MVP combat, including stats, behavior, and room appearance rules.
 
 ## Design Rules
 - Enemy behavior must be deterministic and readable.
@@ -17,7 +17,6 @@ Each enemy uses these fields:
 - `Weapon Attacks`: Number of `1d6` attack rolls.
 - `Weapon Damage`: Base damage for first effective hit.
 - `Defense Dice Bonus`: Extra defense dice added to the base 1 defense die.
-- `Gold Reward`: Gold gained when enemy dies.
 
 ## Enemy Definitions (MVP)
 
@@ -29,7 +28,6 @@ Each enemy uses these fields:
 - Weapon Attacks: `2`
 - Weapon Damage: `2`
 - Defense Dice Bonus: `0`
-- Gold Reward: `4`
 - Target priority:
   1. Nearest hero in melee range.
   2. If no target in range, move toward nearest hero.
@@ -42,7 +40,6 @@ Each enemy uses these fields:
 - Weapon Attacks: `2`
 - Weapon Damage: `2`
 - Defense Dice Bonus: `0`
-- Gold Reward: `5`
 - Target priority:
   1. Lowest current HP hero in range.
   2. If no target in range, move to maintain distance of 3-4 tiles from nearest hero.
@@ -59,8 +56,8 @@ Each enemy uses these fields:
 - No bosses in MVP.
 
 ## Rewards and Economy Hooks
-- Party gains each defeated enemy `Gold Reward` immediately when combat ends.
-- Enemy rewards are additive with treasure room rewards.
+- Combat rooms do not grant rewards directly.
+- Treasure/chest rooms are the only reward source in MVP.
 
 ## Future
 - Add elite variants with one extra behavior rule.

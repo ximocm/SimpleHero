@@ -50,7 +50,6 @@ export interface EnemyState {
   attackDice: number;
   damage: number;
   defenseDiceBonus: number;
-  goldReward: number;
   statusEffects: EnemyTurnStatusEffects;
 }
 

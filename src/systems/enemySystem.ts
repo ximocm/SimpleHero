@@ -61,7 +61,6 @@ export function createEnemyState(
     attackDice: definition.attackDice,
     damage: definition.damage,
     defenseDiceBonus: definition.defenseDiceBonus,
-    goldReward: definition.goldReward,
     statusEffects: {
       rootedTurns: 0,
     },

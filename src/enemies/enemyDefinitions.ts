@@ -9,7 +9,6 @@ export interface EnemyDefinition {
   attackDice: number;
   damage: number;
   defenseDiceBonus: number;
-  goldReward: number;
 }
 
 export const ENEMY_DEFINITIONS: Record<EnemyKind, EnemyDefinition> = {
@@ -22,7 +21,6 @@ export const ENEMY_DEFINITIONS: Record<EnemyKind, EnemyDefinition> = {
     attackDice: 2,
     damage: 2,
     defenseDiceBonus: 0,
-    goldReward: 4,
   },
   'skeleton-archer': {
     kind: 'skeleton-archer',
@@ -33,6 +31,5 @@ export const ENEMY_DEFINITIONS: Record<EnemyKind, EnemyDefinition> = {
     attackDice: 2,
     damage: 2,
     defenseDiceBonus: 0,
-    goldReward: 5,
   },
 };

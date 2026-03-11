@@ -1,6 +1,7 @@
 import type {
   CombatTurnState,
   Coord,
+  EnemyState,
   HeroState,
   HeroTurnResources,
   RoomData,
@@ -334,12 +335,12 @@ function resolveEnemyTurn(state: GameState, enemyId: string): void {
   const heroes = state.party.heroes.filter((hero) => hero.roomId === roomId && hero.hp > 0);
   if (heroes.length === 0) return;
 
-  const target = [...heroes].sort((a, b) => {
-    const da = manhattanDistance(a.tile, enemy.tile);
-    const db = manhattanDistance(b.tile, enemy.tile);
-    if (da !== db) return da - db;
-    return a.id.localeCompare(b.id);
-  })[0];
+  if (enemy.kind === 'skeleton-archer') {
+    resolveSkeletonArcherTurn(state, roomId, enemy, heroes);
+    return;
+  }
+
+  const target = findNearestHero(enemy.tile, heroes);
   if (!target) return;
   if (manhattanDistance(enemy.tile, target.tile) <= enemy.range) {
     const result = performEnemyAttack(state, enemy, target);
@@ -365,7 +366,131 @@ function resolveEnemyTurn(state: GameState, enemyId: string): void {
   enemy.tile = { ...destination };
 }
 
-function canEnemyPathThrough(state: GameState, roomId: string, coord: Coord, targetTile: Coord): boolean {
+function resolveSkeletonArcherTurn(
+  state: GameState,
+  roomId: string,
+  enemy: EnemyState,
+  heroes: HeroState[],
+): void {
+  const inRangeTarget = [...heroes]
+    .filter((hero) => manhattanDistance(hero.tile, enemy.tile) <= enemy.range)
+    .sort((a, b) => {
+      if (a.hp !== b.hp) return a.hp - b.hp;
+      const da = manhattanDistance(a.tile, enemy.tile);
+      const db = manhattanDistance(b.tile, enemy.tile);
+      if (da !== db) return da - db;
+      return a.id.localeCompare(b.id);
+    })[0];
+
+  if (inRangeTarget) {
+    const result = performEnemyAttack(state, enemy, inRangeTarget);
+    state.lastCombatRoll = result.roll;
+    state.recentCombatLog.unshift(
+      `${enemy.kind} -> ${inRangeTarget.className} | atk [${result.roll.attackRolls.join(',')}] def [${result.roll.defenseRolls.join(',')}] dmg ${result.roll.finalDamage}${result.defenderDefeated ? ' | defeated' : ''}`,
+    );
+    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+    return;
+  }
+
+  const maxSteps = Math.max(0, enemy.movement - Math.max(0, enemy.statusEffects.rootedTurns));
+  if (maxSteps === 0) return;
+
+  const reachableTiles = getReachableEnemyTiles(state, roomId, enemy, maxSteps);
+  if (reachableTiles.length === 0) return;
+
+  const destination = [...reachableTiles].sort((a, b) => compareArcherTiles(a, b, heroes))[0];
+  if (!destination || sameCoord(destination, enemy.tile)) return;
+  enemy.tile = { ...destination };
+}
+
+function compareArcherTiles(a: Coord, b: Coord, heroes: HeroState[]): number {
+  const scoreA = scoreArcherTile(a, heroes);
+  const scoreB = scoreArcherTile(b, heroes);
+
+  if (scoreA.bandPenalty !== scoreB.bandPenalty) return scoreA.bandPenalty - scoreB.bandPenalty;
+  if (scoreA.firingPenalty !== scoreB.firingPenalty) return scoreA.firingPenalty - scoreB.firingPenalty;
+  if (scoreA.desiredDistancePenalty !== scoreB.desiredDistancePenalty) {
+    return scoreA.desiredDistancePenalty - scoreB.desiredDistancePenalty;
+  }
+  if (scoreA.lowestTargetHp !== scoreB.lowestTargetHp) return scoreA.lowestTargetHp - scoreB.lowestTargetHp;
+  if (scoreA.nearestHeroDistance !== scoreB.nearestHeroDistance) return scoreB.nearestHeroDistance - scoreA.nearestHeroDistance;
+  if (a.y !== b.y) return a.y - b.y;
+  return a.x - b.x;
+}
+
+function scoreArcherTile(tile: Coord, heroes: HeroState[]): {
+  bandPenalty: number;
+  firingPenalty: number;
+  desiredDistancePenalty: number;
+  lowestTargetHp: number;
+  nearestHeroDistance: number;
+} {
+  const distances = heroes.map((hero) => ({
+    hero,
+    distance: manhattanDistance(tile, hero.tile),
+  }));
+  const nearestHeroDistance = Math.min(...distances.map(({ distance }) => distance));
+  const heroesInRange = distances.filter(({ distance }) => distance <= 4);
+  const lowestTargetHp =
+    heroesInRange.length > 0 ? Math.min(...heroesInRange.map(({ hero }) => hero.hp)) : Number.MAX_SAFE_INTEGER;
+
+  return {
+    bandPenalty: nearestHeroDistance >= 3 && nearestHeroDistance <= 4 ? 0 : 1,
+    firingPenalty: heroesInRange.length > 0 ? 0 : 1,
+    desiredDistancePenalty: Math.abs(4 - nearestHeroDistance),
+    lowestTargetHp,
+    nearestHeroDistance,
+  };
+}
+
+function getReachableEnemyTiles(
+  state: GameState,
+  roomId: string,
+  enemy: EnemyState,
+  maxSteps: number,
+): Coord[] {
+  const room = state.dungeon.rooms.get(roomId);
+  if (!room) return [];
+
+  const reachable: Coord[] = [];
+  for (let y = 0; y < room.height; y += 1) {
+    for (let x = 0; x < room.width; x += 1) {
+      const coord = { x, y };
+      if (sameCoord(coord, enemy.tile)) {
+        reachable.push(coord);
+        continue;
+      }
+
+      const path = findPathAStar(enemy.tile, coord, (candidate) =>
+        canEnemyPathThrough(state, roomId, candidate, coord, enemy.id),
+      );
+      if (path.length < 2) continue;
+      if (path.length - 1 > maxSteps) continue;
+      reachable.push(coord);
+    }
+  }
+
+  return reachable;
+}
+
+function findNearestHero(origin: Coord, heroes: HeroState[]): HeroState | null {
+  return (
+    [...heroes].sort((a, b) => {
+      const da = manhattanDistance(a.tile, origin);
+      const db = manhattanDistance(b.tile, origin);
+      if (da !== db) return da - db;
+      return a.id.localeCompare(b.id);
+    })[0] ?? null
+  );
+}
+
+function canEnemyPathThrough(
+  state: GameState,
+  roomId: string,
+  coord: Coord,
+  targetTile: Coord,
+  movingEnemyId?: string,
+): boolean {
   const room = state.dungeon.rooms.get(roomId);
   if (!room) return false;
   if (!isWalkableCoord(room, coord)) return false;
@@ -377,7 +502,7 @@ function canEnemyPathThrough(state: GameState, roomId: string, coord: Coord, tar
   if (heroOccupied) return false;
 
   const enemyOccupied = (state.dungeon.enemiesByRoomId.get(roomId) ?? []).some(
-    (enemy) => enemy.hp > 0 && sameCoord(enemy.tile, coord),
+    (enemy) => enemy.id !== movingEnemyId && enemy.hp > 0 && sameCoord(enemy.tile, coord),
   );
   return !enemyOccupied;
 }

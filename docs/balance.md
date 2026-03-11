@@ -105,7 +105,8 @@ If multiple sources exist, add them directly.
 - `New HP = min(Max HP, Current HP + Heal Value)`.
 
 ## 7) Economy Values (MVP)
-- Gold gained from defeated enemies is awarded after combat ends.
+- Combat does not grant gold directly.
+- Chest rewards define run income.
 - Ruby value is fixed at `15` gold.
 - Total account gold is updated at end of run if at least one room reward was collected.
 

@@ -9,6 +9,7 @@ export interface WeaponDefinition {
   name: string;
   file: string;
   handsRequired: 1 | 2;
+  castingFocus?: boolean;
   range: number;
   attackDice: number;
   damage: number;
@@ -21,7 +22,7 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     file: 'assets/images/items/short_sword.png',
     handsRequired: 1,
     range: 1,
-    attackDice: 3,
+    attackDice: 2,
     damage: 3,
   },
   'two-handed-sword': {
@@ -38,17 +39,18 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     name: 'Bow',
     file: 'assets/images/items/bow.png',
     handsRequired: 2,
-    range: 4,
-    attackDice: 2,
-    damage: 3,
+    range: 5,
+    attackDice: 3,
+    damage: 2,
   },
   staff: {
     id: 'staff',
     name: 'Staff',
     file: 'assets/images/items/staff.png',
-    handsRequired: 2,
+    handsRequired: 1,
+    castingFocus: true,
     range: 4,
-    attackDice: 2,
+    attackDice: 3,
     damage: 2,
   },
 };

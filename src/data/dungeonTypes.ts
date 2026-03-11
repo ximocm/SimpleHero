@@ -8,6 +8,7 @@ export type EnemyKind = 'skeleton-sword' | 'skeleton-archer';
 export type TurnUnitKind = 'hero' | 'enemy';
 export type CombatPhase = 'heroes' | 'enemies';
 export type RunState = 'active' | 'won' | 'lost';
+export type SpellId = 'heal' | 'fireball' | 'ice';
 
 export interface Coord {
   x: number;
@@ -28,11 +29,17 @@ export interface RoomData {
   exits: Partial<Record<Direction, Coord>>;
   roomType: RoomType;
   encounter: RoomEncounterState | null;
+  progress: RoomProgressState;
 }
 
 export interface RoomEncounterState {
   enemyIds: string[];
   isCleared: boolean;
+}
+
+export interface RoomProgressState {
+  hasBeenEntered: boolean;
+  hasBeenExited: boolean;
 }
 
 export interface EnemyTurnStatusEffects {

@@ -26,7 +26,7 @@ export const RACE_DEFINITIONS: Record<HeroRaceName, RaceDefinition> = {
   Orc: {
     name: 'Orc',
     maxHp: 12,
-    baseMovement: 4,
+    baseMovement: 6,
     body: 4,
     mind: 2,
   },

@@ -9,6 +9,7 @@ import type {
   HeroState,
   RoomData,
   RoomEncounterState,
+  RoomProgressState,
   RoomType,
   RunState,
 } from '../data/dungeonTypes.js';
@@ -107,6 +108,8 @@ interface PersistedGameStateV7 {
   turn: CombatTurnState | null;
   combatRngState: number;
   attackModeHeroId: string | null;
+  castModeHeroId: string | null;
+  selectedSpellId: 'heal' | 'fireball' | 'ice' | null;
   recentCombatLog: string[];
   lastCombatRoll: CombatRollSnapshot | null;
   runState: RunState;
@@ -189,6 +192,8 @@ export function persistGameState(state: GameState): void {
       : null,
     combatRngState: state.combatRngState >>> 0,
     attackModeHeroId: state.attackModeHeroId,
+    castModeHeroId: state.castModeHeroId,
+    selectedSpellId: state.selectedSpellId,
     recentCombatLog: [...state.recentCombatLog],
     lastCombatRoll: state.lastCombatRoll
       ? {
@@ -344,6 +349,11 @@ function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
     'attackModeHeroId' in snapshot && typeof snapshot.attackModeHeroId === 'string'
       ? snapshot.attackModeHeroId
       : null;
+  state.castModeHeroId =
+    'castModeHeroId' in snapshot && typeof snapshot.castModeHeroId === 'string'
+      ? snapshot.castModeHeroId
+      : null;
+  state.selectedSpellId = 'selectedSpellId' in snapshot ? sanitizeSelectedSpellId(snapshot.selectedSpellId) : null;
   state.recentCombatLog =
     'recentCombatLog' in snapshot && Array.isArray(snapshot.recentCombatLog)
       ? snapshot.recentCombatLog.filter((entry): entry is string => typeof entry === 'string').slice(0, 6)
@@ -390,11 +400,13 @@ function sanitizeRoomData(room: RoomData, fallback: RoomData | undefined): RoomD
   const fallbackType = fallback?.roomType ?? 'combat';
   const roomType = sanitizeRoomType(room.roomType, fallbackType);
   const encounter = sanitizeEncounter(room.encounter, roomType, fallback?.encounter ?? null);
+  const progress = sanitizeRoomProgress(room.progress, fallback?.progress);
 
   return {
     ...room,
     roomType,
     encounter,
+    progress,
   };
 }
 
@@ -406,6 +418,11 @@ function sanitizeRoomType(value: unknown, fallback: RoomType): RoomType {
 function sanitizeRunState(value: unknown): RunState {
   if (value === 'active' || value === 'won' || value === 'lost') return value;
   return 'active';
+}
+
+function sanitizeSelectedSpellId(value: unknown): 'heal' | 'fireball' | 'ice' | null {
+  if (value === 'heal' || value === 'fireball' || value === 'ice') return value;
+  return null;
 }
 
 function sanitizeEncounter(
@@ -437,6 +454,30 @@ function cloneEncounter(value: RoomEncounterState | null): RoomEncounterState | 
   return {
     enemyIds: [...value.enemyIds],
     isCleared: value.isCleared,
+  };
+}
+
+function sanitizeRoomProgress(
+  value: unknown,
+  fallback: RoomProgressState | undefined,
+): RoomProgressState {
+  if (!value || typeof value !== 'object') {
+    return {
+      hasBeenEntered: fallback?.hasBeenEntered ?? false,
+      hasBeenExited: fallback?.hasBeenExited ?? false,
+    };
+  }
+
+  const progress = value as Partial<RoomProgressState>;
+  return {
+    hasBeenEntered:
+      typeof progress.hasBeenEntered === 'boolean'
+        ? progress.hasBeenEntered
+        : fallback?.hasBeenEntered ?? false,
+    hasBeenExited:
+      typeof progress.hasBeenExited === 'boolean'
+        ? progress.hasBeenExited
+        : fallback?.hasBeenExited ?? false,
   };
 }
 

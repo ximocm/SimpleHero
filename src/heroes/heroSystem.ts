@@ -60,6 +60,30 @@ export function createHero(
  */
 export function createDefaultHeroes(roomId: string, startTiles: readonly Coord[]): HeroState[] {
   return DEFAULT_PARTY_BLUEPRINTS.map((blueprint, index) =>
-    createHero(`hero-${index}`, roomId, startTiles[index], blueprint),
+    applyStarterLoadout(createHero(`hero-${index}`, roomId, startTiles[index], blueprint)),
   );
+}
+
+function applyStarterLoadout(hero: HeroState): HeroState {
+  if (hero.className === 'Warrior') {
+    hero.equipment.armor = 'heavy-armor';
+    hero.equipment.leftHand = 'short-sword';
+    hero.equipment.rightHand = 'shield';
+    hero.equipment.backpack = ['health-potion'];
+    return hero;
+  }
+
+  if (hero.className === 'Ranger') {
+    hero.equipment.armor = 'light-armor';
+    hero.equipment.leftHand = 'bow';
+    hero.equipment.rightHand = 'bow';
+    hero.equipment.backpack = ['health-potion'];
+    return hero;
+  }
+
+  hero.equipment.armor = 'light-armor';
+  hero.equipment.leftHand = 'staff';
+  hero.equipment.rightHand = 'basic-spellbook';
+  hero.equipment.backpack = ['health-potion'];
+  return hero;
 }

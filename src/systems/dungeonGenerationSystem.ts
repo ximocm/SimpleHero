@@ -31,6 +31,10 @@ export function createRoom(runSeed: number, coord: RoomCoord, roomType: RoomType
     exits: parsed.exits,
     roomType,
     encounter: roomType === 'combat' ? { enemyIds: [], isCleared: true } : null,
+    progress: {
+      hasBeenEntered: false,
+      hasBeenExited: false,
+    },
   };
 }
 
@@ -87,5 +91,34 @@ function parseTemplate(template: RoomTemplate): {
     tiles.push(tileRow);
   }
 
+  stampDefaultExits(tiles, exits, width, height);
+
   return { width, height, tiles, exits };
+}
+
+function stampDefaultExits(
+  tiles: TileType[][],
+  exits: Partial<Record<Direction, Coord>>,
+  width: number,
+  height: number,
+): void {
+  const centerX = Math.floor(width / 2);
+  const centerY = Math.floor(height / 2);
+
+  if (!exits.N) {
+    exits.N = { x: centerX, y: 1 };
+    tiles[1][centerX] = TileType.EXIT;
+  }
+  if (!exits.S) {
+    exits.S = { x: centerX, y: height - 2 };
+    tiles[height - 2][centerX] = TileType.EXIT;
+  }
+  if (!exits.W) {
+    exits.W = { x: 0, y: centerY };
+    tiles[centerY][0] = TileType.EXIT;
+  }
+  if (!exits.E) {
+    exits.E = { x: width - 1, y: centerY };
+    tiles[centerY][width - 1] = TileType.EXIT;
+  }
 }

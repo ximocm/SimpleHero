@@ -22,7 +22,7 @@ Races define these base stats:
 |---|---:|---:|---:|---:|
 | Human | 10 | 5 | 3 | 3 |
 | Elf | 8 | 6 | 2 | 4 |
-| Orc | 12 | 4 | 4 | 2 |
+| Orc | 12 | 6 | 4 | 2 |
 
 ## Movement Clarification
 - There is no universal race bonus of `+2 Movement` in MVP.

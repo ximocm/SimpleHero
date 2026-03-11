@@ -1,12 +1,16 @@
 import type { Coord } from './data/dungeonTypes.js';
 import { TileType } from './data/tileTypes.js';
 import {
+  isRoomObjectiveCleared,
+  canHeroCastSpellOnEnemy,
+  canHeroCastSpellOnHero,
   canHeroBasicAttackEnemy,
   canUseActiveHeroConsumable,
   canWalkTile,
+  cancelCastMode,
   commitMoveFromHover,
   createGameState,
-  getActiveHeroConsumableActionView,
+  getActiveHeroCastActionView,
   getCurrentRoomEncounterView,
   getCurrentRoomEnemyViews,
   getCurrentRoomEnemies,
@@ -16,17 +20,22 @@ import {
   getCurrentRoom,
   getCurrentRoomCoordId,
   getRunSummaryView,
+  getSelectedSpellDefinition,
   getTileAt,
   isBackpackConsumableTargetable,
   setActiveHeroIndex,
+  selectActiveHeroSpell,
   stepMovement,
+  toggleCastMode,
   toggleAttackMode,
   toggleItemUseMode,
+  tryHeroCastSpellAtTile,
   tryHeroAttackAtTile,
   updateHoverPath,
   useActiveHeroBackpackConsumable,
 } from './systems/gameSystem.js';
-import { getHeroAttackProfile } from './systems/combatSystem.js';
+import { getFireballAreaTiles, getHeroAttackProfile, getHeroCastRequirementView } from './systems/combatSystem.js';
+import { SPELL_DEFINITIONS } from './magic/spells.js';
 import { advanceAutomatedTurns, getTurnBannerView, isCurrentTurnHero, passTurn } from './systems/turnSystem.js';
 import {
   clearPersistedGameState,
@@ -94,6 +103,8 @@ const partyInventoryList = requireElement<HTMLDivElement>('#partyInventoryList')
 const menuButton = requireElement<HTMLButtonElement>('#menuButton');
 const resetStateButton = requireElement<HTMLButtonElement>('#resetStateButton');
 const attackButton = requireElement<HTMLButtonElement>('#attackButton');
+const castButton = requireElement<HTMLButtonElement>('#castButton');
+const castMenu = requireElement<HTMLDivElement>('#castMenu');
 const useItemButton = requireElement<HTMLButtonElement>('#useItemButton');
 const endTurnButton = requireElement<HTMLButtonElement>('#endTurnButton');
 
@@ -151,6 +162,7 @@ function startNewGame(): void {
   renderCharacterPanels();
   renderPartyInventory();
   renderCombatLog();
+  renderCastMenu();
   renderAppMode();
 }
 
@@ -169,6 +181,7 @@ function loadSavedGame(): void {
   renderCharacterPanels();
   renderPartyInventory();
   renderCombatLog();
+  renderCastMenu();
   renderAppMode();
 }
 
@@ -183,6 +196,7 @@ function rebootToMenu(): void {
   renderCharacterPanels();
   renderPartyInventory();
   renderCombatLog();
+  renderCastMenu();
   renderAppMode();
 }
 
@@ -202,6 +216,7 @@ characterPanels.addEventListener('click', (event) => {
         persistAll();
         renderCharacterPanels();
         renderPartyInventory();
+        renderCastMenu();
         renderCombatLog();
         return;
       }
@@ -215,9 +230,22 @@ characterPanels.addEventListener('click', (event) => {
   const index = Number(raw);
   if (!Number.isInteger(index)) return;
 
+  const clickedHero = state.party.heroes[index];
+  if (clickedHero && state.selectedSpellId === 'heal') {
+    const casted = tryHeroCastSpellAtTile(state, clickedHero.tile);
+    if (casted) {
+      persistAll();
+      renderCharacterPanels();
+      renderCastMenu();
+      renderCombatLog();
+      return;
+    }
+  }
+
   setActiveHeroIndex(state, index);
   persistAll();
   renderCharacterPanels();
+  renderCastMenu();
 });
 
 characterPanels.addEventListener('dragstart', (event) => {
@@ -276,6 +304,7 @@ characterPanels.addEventListener('drop', (event) => {
   if (!movePayloadToSlot(payload, heroIndex, slot)) return;
   persistAll();
   renderCharacterPanels();
+  renderCastMenu();
   renderPartyInventory();
 });
 
@@ -327,7 +356,31 @@ attackButton.addEventListener('click', () => {
   toggleAttackMode(state);
   persistAll();
   renderCharacterPanels();
+  renderCastMenu();
   renderCombatLog();
+});
+
+castButton.addEventListener('click', () => {
+  if (!isGameplayMode()) return;
+  toggleCastMode(state);
+  persistAll();
+  renderCharacterPanels();
+  renderCastMenu();
+  renderCombatLog();
+});
+
+castMenu.addEventListener('click', (event) => {
+  if (!isGameplayMode()) return;
+  const target = event.target as HTMLElement | null;
+  const spellId = target?.closest<HTMLElement>('[data-spell-id]')?.dataset.spellId;
+  if (!spellId) return;
+  if (spellId === 'cancel') {
+    cancelCastMode(state);
+  } else if (spellId === 'heal' || spellId === 'fireball' || spellId === 'ice') {
+    selectActiveHeroSpell(state, spellId);
+  }
+  persistAll();
+  renderCastMenu();
 });
 
 useItemButton.addEventListener('click', () => {
@@ -336,6 +389,7 @@ useItemButton.addEventListener('click', () => {
   if (!toggled && !state.itemUseModeHeroId) return;
   persistAll();
   renderCharacterPanels();
+  renderCastMenu();
   renderCombatLog();
 });
 
@@ -344,6 +398,7 @@ endTurnButton.addEventListener('click', () => {
   passTurn(state);
   persistAll();
   renderCharacterPanels();
+  renderCastMenu();
   renderCombatLog();
 });
 
@@ -420,16 +475,35 @@ canvas.addEventListener('mousemove', (event) => {
 
   if (!inBounds(target, room.width, room.height)) {
     state.hoverPath = [];
+    state.spellPreviewTiles = [];
     return;
   }
   if (state.runState !== 'active') {
     state.hoverPath = [];
+    state.spellPreviewTiles = [];
     return;
   }
 
   const tile = getTileAt(room, target);
   if (tile === TileType.VOID_BLACK) {
     state.hoverPath = [];
+    state.spellPreviewTiles = [];
+    return;
+  }
+
+  if (state.selectedSpellId === 'fireball') {
+    const activeHero = state.party.heroes[state.party.activeHeroIndex];
+    const targetEnemy = getCurrentRoomEnemies(state).find((enemy) => enemy.hp > 0 && enemy.tile.x === target.x && enemy.tile.y === target.y);
+    if (targetEnemy && canHeroCastSpellOnEnemy(state, activeHero.id, targetEnemy.id)) {
+      state.hoverPath = [];
+      state.spellPreviewTiles = getFireballAreaTiles(target).filter(
+        (coord) => inBounds(coord, room.width, room.height) && getTileAt(room, coord) !== TileType.VOID_BLACK,
+      );
+      return;
+    }
+
+    state.hoverPath = [];
+    state.spellPreviewTiles = [];
     return;
   }
 
@@ -455,6 +529,14 @@ canvas.addEventListener('click', (event) => {
   if (tryHeroAttackAtTile(state, target)) {
     persistAll();
     renderCharacterPanels();
+    renderCastMenu();
+    renderCombatLog();
+    return;
+  }
+  if (tryHeroCastSpellAtTile(state, target)) {
+    persistAll();
+    renderCharacterPanels();
+    renderCastMenu();
     renderCombatLog();
     return;
   }
@@ -475,11 +557,13 @@ window.addEventListener('keydown', (event) => {
     passTurn(state);
     persistAll();
     renderCharacterPanels();
+    renderCastMenu();
     renderCombatLog();
   }
   if (event.key === '1' || event.key === '2' || event.key === '3') {
     persistAll();
     renderCharacterPanels();
+    renderCastMenu();
     renderCombatLog();
   }
 });
@@ -519,6 +603,16 @@ function draw(): void {
     ctx.fillRect(px + 3, py + 3, tileSize - 6, tileSize - 6);
   }
 
+  for (const tile of state.spellPreviewTiles) {
+    const px = offset.x + tile.x * tileSize;
+    const py = offset.y + tile.y * tileSize;
+    ctx.fillStyle = 'rgba(249, 115, 22, 0.3)';
+    ctx.fillRect(px + 2, py + 2, tileSize - 4, tileSize - 4);
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px + 3, py + 3, tileSize - 6, tileSize - 6);
+  }
+
   state.party.heroes.forEach((hero, index) => {
     if (hero.hp <= 0) return;
     if (state.readyByHeroId.has(hero.id)) return;
@@ -526,13 +620,16 @@ function draw(): void {
     const cx = offset.x + hero.tile.x * tileSize + tileSize / 2;
     const cy = offset.y + hero.tile.y * tileSize + tileSize / 2;
     const radius = tileSize * 0.3;
+    const isHealTargetable =
+      state.selectedSpellId === 'heal' &&
+      canHeroCastSpellOnHero(state, state.party.heroes[state.party.activeHeroIndex].id, hero.id);
 
     ctx.fillStyle = index === state.party.activeHeroIndex ? '#fbbf24' : '#e2e8f0';
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = isHealTargetable ? '#86efac' : '#0f172a';
+    ctx.lineWidth = isHealTargetable ? 3 : 2;
     ctx.stroke();
 
     const tri = facingTriangle(cx, cy, radius, hero.facing);
@@ -563,8 +660,8 @@ function draw(): void {
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = enemy.isAttackTargetable ? '#fde68a' : '#3f0d16';
-    ctx.lineWidth = enemy.isAttackTargetable ? 3 : 2;
+    ctx.strokeStyle = enemy.isSpellTargetable ? '#c4b5fd' : enemy.isAttackTargetable ? '#fde68a' : '#3f0d16';
+    ctx.lineWidth = enemy.isSpellTargetable || enemy.isAttackTargetable ? 3 : 2;
     ctx.stroke();
 
     ctx.fillStyle = '#fff7ed';
@@ -618,10 +715,12 @@ function drawHud(): void {
     ? ` | Move ${heroResources.movementRemaining} | AP ${heroResources.actionPointsRemaining} | Attack ${heroResources.attackSlotAvailable ? 'ready' : 'spent'}`
     : '';
   const weaponText = getSelectedHeroWeaponSummary();
+  const castText = getSelectedHeroCastingSummary();
+  const selectedSpell = getSelectedSpellDefinition(state);
   const lastRollText = getLastRollSummary();
-  status.textContent = `Discovered rooms: ${state.dungeon.discoveredRoomIds.size} | Seed: ${state.dungeon.seed} | Room type: ${encounter.roomType} | Turn: ${turn.activeLabel}${heroResourcesText} | Weapon: ${weaponText}${lastRollText ? ` | ${lastRollText}` : ''}`;
+  status.textContent = `Discovered rooms: ${state.dungeon.discoveredRoomIds.size} | Seed: ${state.dungeon.seed} | Room type: ${encounter.roomType} | Turn: ${turn.activeLabel}${heroResourcesText} | Weapon: ${weaponText} | ${castText}${selectedSpell ? ` | Spell: ${selectedSpell.name}` : ''}${lastRollText ? ` | ${lastRollText}` : ''}`;
   if (state.runState === 'won') {
-    status.textContent = `Run won | Reached the exit room with surviving heroes | Weapon: ${weaponText}${lastRollText ? ` | ${lastRollText}` : ''}`;
+    status.textContent = `Run won | All required rooms cleared and exit reached | Weapon: ${weaponText}${lastRollText ? ` | ${lastRollText}` : ''}`;
   } else if (state.runState === 'lost') {
     status.textContent = `Run lost | All heroes defeated${lastRollText ? ` | ${lastRollText}` : ''}`;
   }
@@ -630,6 +729,10 @@ function drawHud(): void {
       ? 'Run complete. Use reset saved state to start a new run.'
       : state.runState === 'lost'
         ? 'Run failed. Use reset saved state to start a new run.'
+      : state.castModeHeroId && !state.selectedSpellId
+        ? 'Cast mode: choose a spell from the spell menu'
+      : state.selectedSpellId
+        ? `Spell mode: ${selectedSpell?.name ?? state.selectedSpellId} | click a valid target`
       : state.attackModeHeroId
       ? 'Attack mode: click a highlighted enemy to attack | 1/2/3 or click card = active hero'
       : state.itemUseModeHeroId
@@ -642,7 +745,15 @@ function drawHud(): void {
   attackButton.disabled = state.runState !== 'active' || !turn.isCombatActive || !isCurrentTurnHero(state);
   attackButton.style.opacity = attackButton.disabled ? '0.5' : '1';
   attackButton.textContent = state.attackModeHeroId === activeHero.id ? 'cancel attack' : hasAttackTarget ? 'basic attack' : 'basic attack';
-  const consumableAction = getActiveHeroConsumableActionView(state);
+  const castAction = getActiveHeroCastActionView(state);
+  castButton.disabled = !turn.isCombatActive || !isCurrentTurnHero(state) || !castAction.isAvailable;
+  castButton.style.opacity = castButton.disabled ? '0.5' : '1';
+  castButton.textContent =
+    state.castModeHeroId === activeHero.id
+      ? state.selectedSpellId
+        ? `cancel ${selectedSpell?.name ?? 'spell'}`
+        : 'cancel cast'
+      : 'cast';
   useItemButton.disabled = state.runState !== 'active' || !canUseActiveHeroConsumable(state);
   useItemButton.style.opacity = useItemButton.disabled ? '0.5' : '1';
   useItemButton.textContent =
@@ -657,6 +768,13 @@ function getSelectedHeroWeaponSummary(): string {
   if (!hero) return 'none';
   const profile = getHeroAttackProfile(hero);
   return `${profile.label} | dice ${profile.attackDice} | damage ${profile.damage} | range ${profile.range}`;
+}
+
+function getSelectedHeroCastingSummary(): string {
+  const hero = state.party.heroes[state.party.activeHeroIndex];
+  if (!hero) return 'Book: none | Focus: none';
+  const requirements = getHeroCastRequirementView(hero);
+  return `Book: ${requirements.spellbookName ?? 'none'} | Focus: ${requirements.focusName ?? 'none'}`;
 }
 
 function getLastRollSummary(): string {
@@ -698,7 +816,10 @@ function drawMinimap(): void {
   coords.forEach((coord) => {
     const px = offsetX + (coord.x - minX) * cell;
     const py = offsetY + (coord.y - minY) * cell;
-    minimapCtx.fillStyle = coord.id === state.dungeon.currentRoomId ? '#fbbf24' : '#334155';
+    const room = state.dungeon.rooms.get(coord.id);
+    const isCleared = room ? isRoomObjectiveCleared(room) : false;
+    minimapCtx.fillStyle =
+      coord.id === state.dungeon.currentRoomId ? '#fbbf24' : isCleared ? '#22c55e' : '#334155';
     minimapCtx.fillRect(px + 2, py + 2, cell - 4, cell - 4);
   });
 }
@@ -728,6 +849,38 @@ function renderPartyInventory(): void {
 
 function renderCombatLog(): void {
   combatLog.innerHTML = renderCombatLogHtml(state.recentCombatLog);
+}
+
+function renderCastMenu(): void {
+  const hero = state.party.heroes[state.party.activeHeroIndex];
+  if (!hero || state.castModeHeroId !== hero.id) {
+    castMenu.style.display = 'none';
+    castMenu.innerHTML = '';
+    return;
+  }
+
+  const castAction = getActiveHeroCastActionView(state);
+  if (!castAction.isAvailable || castAction.spellIds.length === 0) {
+    castMenu.style.display = 'none';
+    castMenu.innerHTML = '';
+    return;
+  }
+
+  castMenu.style.display = 'block';
+  castMenu.innerHTML = `
+    <div style="padding:10px; border:1px solid rgba(167,139,250,0.28); background:rgba(46,16,101,0.72); display:flex; flex-direction:column; gap:8px;">
+      ${castAction.spellIds
+        .map((spellId) => {
+          const spell = SPELL_DEFINITIONS[spellId];
+          const isSelected = state.selectedSpellId === spellId;
+          return `<button data-spell-id="${spellId}" type="button" style="padding:8px 10px; text-align:left; border:1px solid ${
+            isSelected ? 'rgba(221,214,254,0.9)' : 'rgba(196,181,253,0.25)'
+          }; background:${isSelected ? 'rgba(109,40,217,0.7)' : 'rgba(76,29,149,0.42)'}; color:#ede9fe; cursor:pointer;">${spell?.name ?? spellId}</button>`;
+        })
+        .join('')}
+      <button data-spell-id="cancel" type="button" style="padding:8px 10px; text-align:left; border:1px solid rgba(148,163,184,0.28); background:rgba(30,41,59,0.72); color:#cbd5e1; cursor:pointer;">cancel</button>
+    </div>
+  `;
 }
 
 function readDragPayload(event: DragEvent): DragPayload | null {
@@ -844,7 +997,7 @@ function canEquipItemToSlot(itemId: string, slot: EquipSlot): boolean {
   if (slot === 'backpack') return true;
   if (slot === 'armor') return item.category === 'armor' && item.id !== 'shield';
   if (slot === 'leftHand' || slot === 'rightHand') {
-    return item.category === 'weapon' || item.id === 'shield';
+    return item.category === 'weapon' || item.category === 'spellbook' || item.id === 'shield';
   }
   if (slot === 'relic') return item.category === 'consumable';
   return false;
@@ -892,6 +1045,7 @@ function getHandsRequired(itemId: string): number {
   const item = itemById.get(itemId);
   if (!item) return 1;
   if (item.category === 'weapon') return item.handsRequired;
+  if (item.category === 'spellbook') return item.handsRequired;
   if (item.id === 'shield') return item.handsRequired ?? 1;
   return 0;
 }
@@ -901,12 +1055,17 @@ function getItemTooltip(itemId: string): string {
   if (!item) return itemId;
 
   if (item.category === 'weapon') {
-    return `${item.name}\nRange: ${item.range}\nAttack dice: ${item.attackDice}\nDamage: ${item.damage}\nHands: ${item.handsRequired}`;
+    const focus = item.castingFocus ? '\nCasting focus: yes' : '';
+    return `${item.name}\nRange: ${item.range}\nAttack dice: ${item.attackDice}\nDamage: ${item.damage}\nHands: ${item.handsRequired}${focus}`;
   }
 
   if (item.category === 'armor') {
     const hands = item.handsRequired ? `\nHands: ${item.handsRequired}` : '';
     return `${item.name}\nDefense dice bonus: ${item.defenseDiceBonus}\nMovement modifier: ${item.movementModifier}${hands}`;
+  }
+
+  if (item.category === 'spellbook') {
+    return `${item.name}\nSpells: ${item.spellIds.join(', ')}\nHands: ${item.handsRequired}`;
   }
 
   return `${item.name}\nEffect: ${item.effect}\nValue: ${item.value}`;
@@ -971,6 +1130,7 @@ function tick(): void {
       persistAll();
       renderCharacterPanels();
       renderPartyInventory();
+      renderCastMenu();
       renderCombatLog();
     }
     if (state.runState !== 'active') {
@@ -998,6 +1158,7 @@ window.addEventListener('beforeunload', () => {
 renderCharacterPanels();
 renderPartyInventory();
 renderCombatLog();
+renderCastMenu();
 renderAppMode();
 tick();
 

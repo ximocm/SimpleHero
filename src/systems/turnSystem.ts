@@ -34,6 +34,8 @@ export function syncCombatTurnState(state: GameState): void {
     state.turn = null;
     state.turnAutomationReadyAt = null;
     state.attackModeHeroId = null;
+    state.castModeHeroId = null;
+    state.selectedSpellId = null;
     return;
   }
   const room = state.dungeon.rooms.get(state.dungeon.currentRoomId);
@@ -41,6 +43,8 @@ export function syncCombatTurnState(state: GameState): void {
     state.turn = null;
     state.turnAutomationReadyAt = null;
     state.attackModeHeroId = null;
+    state.castModeHeroId = null;
+    state.selectedSpellId = null;
     return;
   }
 
@@ -306,6 +310,8 @@ function beginEnemyPhase(state: GameState): void {
   state.hoverPath = [];
   state.movingPath = [];
   state.attackModeHeroId = null;
+  state.castModeHeroId = null;
+  state.selectedSpellId = null;
 }
 
 function beginHeroPhase(state: GameState): void {
@@ -320,6 +326,8 @@ function beginHeroPhase(state: GameState): void {
   state.turnAutomationReadyAt = null;
   state.hoverPath = [];
   state.movingPath = [];
+  state.castModeHeroId = null;
+  state.selectedSpellId = null;
 
   const firstHeroIndex = state.party.heroes.findIndex(
     (hero) => hero.roomId === turn.roomId && hero.hp > 0 && turn.heroResourcesById[hero.id],
@@ -348,6 +356,7 @@ function resolveEnemyTurn(state: GameState, enemyId: string): void {
 
   if (enemy.kind === 'skeleton-archer') {
     resolveSkeletonArcherTurn(state, roomId, enemy, heroes);
+    enemy.statusEffects.rootedTurns = Math.max(0, enemy.statusEffects.rootedTurns - 1);
     return;
   }
 
@@ -360,6 +369,7 @@ function resolveEnemyTurn(state: GameState, enemyId: string): void {
       `${enemy.kind} -> ${target.className} | atk [${result.roll.attackRolls.join(',')}] def [${result.roll.defenseRolls.join(',')}] dmg ${result.roll.finalDamage}${result.defenderDefeated ? ' | defeated' : ''}`,
     );
     state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+    enemy.statusEffects.rootedTurns = Math.max(0, enemy.statusEffects.rootedTurns - 1);
     return;
   }
 
@@ -373,8 +383,12 @@ function resolveEnemyTurn(state: GameState, enemyId: string): void {
 
   const furthestIndex = Math.min(path.length - 2, maxSteps);
   const destination = path[furthestIndex];
-  if (!destination) return;
+  if (!destination) {
+    enemy.statusEffects.rootedTurns = Math.max(0, enemy.statusEffects.rootedTurns - 1);
+    return;
+  }
   enemy.tile = { ...destination };
+  enemy.statusEffects.rootedTurns = Math.max(0, enemy.statusEffects.rootedTurns - 1);
 }
 
 function resolveSkeletonArcherTurn(

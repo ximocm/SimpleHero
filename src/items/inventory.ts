@@ -4,7 +4,7 @@ export interface InventoryEntry {
   itemId: string;
   name: string;
   file: string;
-  category: 'weapon' | 'armor' | 'consumable';
+  category: 'weapon' | 'armor' | 'consumable' | 'spellbook';
 }
 
 /**
@@ -12,7 +12,7 @@ export interface InventoryEntry {
  * @returns Starter inventory entries.
  */
 export function createStarterPartyInventory(): InventoryEntry[] {
-  return ITEM_DEFINITIONS.map((item) => ({
+  return ITEM_DEFINITIONS.filter((item) => item.id === 'two-handed-sword').map((item) => ({
     itemId: item.id,
     name: item.name,
     file: item.file,

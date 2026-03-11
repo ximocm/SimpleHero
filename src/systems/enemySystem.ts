@@ -169,7 +169,7 @@ function getReservedHeroTiles(room: RoomData, entryDirection: Direction | null):
     return a.x - b.x;
   });
 
-  return walkable.slice(0, 3);
+  return walkable.slice(0, 6);
 }
 
 function getEntryAnchor(room: RoomData, entryDirection: Direction | null): Coord {

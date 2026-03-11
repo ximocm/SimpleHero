@@ -60,6 +60,10 @@ export function createDungeonState(seed: number): DungeonState {
   });
 
   const originId = roomIdFromCoord(coords[0]);
+  const originRoom = rooms.get(originId);
+  if (originRoom) {
+    originRoom.progress.hasBeenEntered = true;
+  }
   return {
     seed,
     totalFloors,
@@ -165,5 +169,5 @@ function chooseRoomType(seed: number, coord: RoomCoord, index: number, totalFloo
 
   const roomId = roomIdFromCoord(coord);
   const rng = createRng(seedFromRoom(seed, `${roomId}:room-type`));
-  return rng() < 0.7 ? 'combat' : 'treasure';
+  return rng() < 0.9 ? 'combat' : 'treasure';
 }

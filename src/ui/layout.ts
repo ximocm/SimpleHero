@@ -41,6 +41,14 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
               basic attack
             </button>
             <button
+              id="castButton"
+              type="button"
+              style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(167,139,250,0.45); background:rgba(76,29,149,0.42); color:#ede9fe; cursor:pointer;"
+            >
+              cast
+            </button>
+            <div id="castMenu" style="display:none; margin:-4px 0 12px 0;"></div>
+            <button
               id="useItemButton"
               type="button"
               style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(74,222,128,0.45); background:rgba(20,83,45,0.45); color:#dcfce7; cursor:pointer;"

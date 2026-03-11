@@ -11,6 +11,7 @@ import type {
   RoomEncounterState,
   RoomType,
   RunState,
+  SpellId,
 } from '../data/dungeonTypes.js';
 import { isWalkable, TileType } from '../data/tileTypes.js';
 import {
@@ -23,8 +24,17 @@ import { inBounds } from '../utils/grid.js';
 import { findPathAStar } from '../utils/pathfinding.js';
 import { createDungeonState, getRoomAt } from './dungeonStateSystem.js';
 import { createParty, getActiveHero, setActiveHero } from './partySystem.js';
-import { getHeroAttackRange, performHeroAttack } from './combatSystem.js';
+import {
+  canHeroCastSpells,
+  getHeroAttackRange,
+  getHeroAvailableSpellIds,
+  performFireballSpell,
+  performHealSpell,
+  performHeroAttack,
+  performIceSpell,
+} from './combatSystem.js';
 import { CONSUMABLE_DEFINITIONS } from '../items/consumables.js';
+import { SPELL_DEFINITIONS } from '../magic/spells.js';
 import {
   canHeroActNow,
   canSelectHeroThisPhase,
@@ -40,12 +50,15 @@ export interface GameState {
   party: PartyState;
   runState: RunState;
   hoverPath: Coord[];
+  spellPreviewTiles: Coord[];
   movingPath: Coord[];
   readyByHeroId: Map<string, Direction>;
   turn: CombatTurnState | null;
   turnAutomationReadyAt: number | null;
   combatRngState: number;
   attackModeHeroId: string | null;
+  castModeHeroId: string | null;
+  selectedSpellId: SpellId | null;
   itemUseModeHeroId: string | null;
   recentCombatLog: string[];
   lastCombatRoll: CombatRollSnapshot | null;
@@ -89,11 +102,17 @@ export interface EnemyBoardView {
   hp: number;
   maxHp: number;
   isAttackTargetable: boolean;
+  isSpellTargetable: boolean;
 }
 
 export interface ConsumableActionView {
   label: string;
   isAvailable: boolean;
+}
+
+export interface CastActionView {
+  isAvailable: boolean;
+  spellIds: SpellId[];
 }
 
 export interface RunSummaryView {
@@ -124,12 +143,15 @@ export function createGameState(seed: number): GameState {
     party,
     runState: 'active',
     hoverPath: [],
+    spellPreviewTiles: [],
     movingPath: [],
     readyByHeroId: new Map(),
     turn: null,
     turnAutomationReadyAt: null,
     combatRngState: (seed ^ 0x9e3779b9) >>> 0,
     attackModeHeroId: null,
+    castModeHeroId: null,
+    selectedSpellId: null,
     itemUseModeHeroId: null,
     recentCombatLog: [],
     lastCombatRoll: null,
@@ -162,9 +184,15 @@ export function setActiveHeroIndex(state: GameState, index: number): void {
   if (!canSelectHeroThisPhase(state, nextHero.id)) return;
   setActiveHero(state.party, index);
   state.hoverPath = [];
+  state.spellPreviewTiles = [];
   state.movingPath = [];
   if (state.attackModeHeroId && state.attackModeHeroId !== nextHero.id) {
     state.attackModeHeroId = nextHero.id;
+  }
+  if (state.castModeHeroId && state.castModeHeroId !== nextHero.id) {
+    state.castModeHeroId = nextHero.id;
+    state.selectedSpellId = null;
+    state.spellPreviewTiles = [];
   }
   if (state.itemUseModeHeroId && state.itemUseModeHeroId !== nextHero.id) {
     state.itemUseModeHeroId = nextHero.id;
@@ -180,12 +208,14 @@ export function setActiveHeroIndex(state: GameState, index: number): void {
 export function updateHoverPath(state: GameState, target: Coord): void {
   if (state.runState !== 'active') {
     state.hoverPath = [];
+    state.spellPreviewTiles = [];
     return;
   }
   const room = getCurrentRoom(state);
   const hero = getActiveHero(state.party);
   if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) {
     state.hoverPath = [];
+    state.spellPreviewTiles = [];
     return;
   }
   const path = findPathAStar(hero.tile, target, (coord) =>
@@ -196,9 +226,11 @@ export function updateHoverPath(state: GameState, target: Coord): void {
   const resources = getCurrentHeroTurnResources(state);
   if (resources && path.length > 1 && path.length - 1 > resources.movementRemaining) {
     state.hoverPath = [];
+    state.spellPreviewTiles = [];
     return;
   }
   state.hoverPath = path;
+  state.spellPreviewTiles = [];
 }
 
 /**
@@ -211,6 +243,7 @@ export function commitMoveFromHover(state: GameState): void {
   const hero = getActiveHero(state.party);
   if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) return;
   if (state.attackModeHeroId) return;
+  if (state.castModeHeroId) return;
   if (state.itemUseModeHeroId) return;
   if (state.hoverPath.length < 2) return;
   state.movingPath = [...state.hoverPath];
@@ -226,6 +259,7 @@ export function stepMovement(state: GameState): boolean {
   const hero = getActiveHero(state.party);
   if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) return false;
   if (state.attackModeHeroId) return false;
+  if (state.castModeHeroId) return false;
   if (state.itemUseModeHeroId) return false;
   if (state.movingPath.length < 2) return false;
 
@@ -339,8 +373,10 @@ function maybeTransitionRoom(state: GameState): void {
   const nextRoom = getRoomAt(state.dungeon, nextCoord);
   if (!nextRoom) return;
 
+  current.progress.hasBeenExited = true;
   state.dungeon.currentRoomId = nextRoom.id;
   state.dungeon.discoveredRoomIds.add(nextRoom.id);
+  nextRoom.progress.hasBeenEntered = true;
 
   const opposite = oppositeDirection(direction);
   const entry = nextRoom.exits[opposite];
@@ -359,9 +395,14 @@ function maybeTransitionRoom(state: GameState): void {
   state.movingPath = [];
   syncCombatTurnState(state);
   if (nextRoom.roomType === 'exit' && state.party.heroes.some((hero) => hero.hp > 0)) {
-    setRunState(state, 'won');
-    state.recentCombatLog.unshift('Run complete: the party reached the exit room.');
-    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+    if (areAllRequiredRoomsCleared(state.dungeon)) {
+      setRunState(state, 'won');
+      state.recentCombatLog.unshift('Run complete: the party cleared every required room and reached the exit.');
+      state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+    } else {
+      state.recentCombatLog.unshift('Exit sealed: clear every combat room and complete every treasure room before the run can be won.');
+      state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+    }
   }
 }
 
@@ -480,9 +521,8 @@ export function getCurrentFloorNumber(state: GameState): number {
  */
 export function getCurrentRoomEncounterView(state: GameState): RoomEncounterView {
   const room = getCurrentRoom(state);
-  const encounter = room.encounter;
   const enemyCount = getCurrentRoomEnemies(state).length;
-  const isCleared = encounter?.isCleared ?? true;
+  const isCleared = isRoomObjectiveCleared(room);
 
   return {
     roomType: room.roomType,
@@ -562,6 +602,7 @@ export function getCurrentRoomEnemyViews(state: GameState): EnemyBoardView[] {
       enemy.hp > 0 &&
       attackHeroId === hero.id &&
       canHeroBasicAttackEnemy(state, hero.id, enemy.id),
+    isSpellTargetable: enemy.hp > 0 && isEnemySpellTargetable(state, hero.id, enemy.id),
   }));
 }
 
@@ -579,7 +620,10 @@ export function toggleAttackMode(state: GameState): boolean {
 
   state.movingPath = [];
   state.hoverPath = [];
+  state.spellPreviewTiles = [];
   state.attackModeHeroId = state.attackModeHeroId === hero.id ? null : hero.id;
+  state.castModeHeroId = null;
+  state.selectedSpellId = null;
   state.itemUseModeHeroId = null;
   return state.attackModeHeroId === hero.id;
 }
@@ -606,8 +650,11 @@ export function tryHeroAttackAtTile(state: GameState, target: Coord): boolean {
   state.recentCombatLog.unshift(formatCombatLogEntry(hero.className, enemy.kind, result.roll, result.defenderDefeated));
   state.recentCombatLog = state.recentCombatLog.slice(0, 6);
   state.attackModeHeroId = null;
+  state.castModeHeroId = null;
+  state.selectedSpellId = null;
   state.itemUseModeHeroId = null;
   state.hoverPath = [];
+  state.spellPreviewTiles = [];
   state.movingPath = [];
   syncCombatTurnState(state);
   return true;
@@ -671,6 +718,135 @@ export function getActiveHeroConsumableActionView(state: GameState): ConsumableA
   };
 }
 
+export function getActiveHeroCastActionView(state: GameState): CastActionView {
+  const hero = getActiveHero(state.party);
+  if (hero.className !== 'Mage') {
+    return { isAvailable: false, spellIds: [] };
+  }
+
+  const resources = getCurrentHeroTurnResources(state);
+  return {
+    isAvailable:
+      canHeroActNow(state, hero.id) &&
+      Boolean(resources?.attackSlotAvailable) &&
+      canHeroCastSpells(hero),
+    spellIds: getHeroAvailableSpellIds(hero),
+  };
+}
+
+export function toggleCastMode(state: GameState): boolean {
+  if (state.runState !== 'active') return false;
+  const hero = getActiveHero(state.party);
+  const castAction = getActiveHeroCastActionView(state);
+  if (!castAction.isAvailable) return false;
+
+  const isOpen = state.castModeHeroId === hero.id;
+  state.attackModeHeroId = null;
+  state.itemUseModeHeroId = null;
+  state.hoverPath = [];
+  state.spellPreviewTiles = [];
+  state.movingPath = [];
+
+  if (isOpen) {
+    state.castModeHeroId = null;
+    state.selectedSpellId = null;
+    state.spellPreviewTiles = [];
+    return false;
+  }
+
+  state.castModeHeroId = hero.id;
+  state.selectedSpellId = null;
+  state.spellPreviewTiles = [];
+  return true;
+}
+
+export function selectActiveHeroSpell(state: GameState, spellId: SpellId): boolean {
+  const hero = getActiveHero(state.party);
+  if (state.castModeHeroId !== hero.id) return false;
+  if (!getHeroAvailableSpellIds(hero).includes(spellId)) return false;
+  state.selectedSpellId = spellId;
+  state.spellPreviewTiles = [];
+  return true;
+}
+
+export function cancelCastMode(state: GameState): void {
+  state.castModeHeroId = null;
+  state.selectedSpellId = null;
+  state.spellPreviewTiles = [];
+}
+
+export function getSelectedSpellDefinition(state: GameState) {
+  return state.selectedSpellId ? SPELL_DEFINITIONS[state.selectedSpellId] : null;
+}
+
+export function tryHeroCastSpellAtTile(state: GameState, target: Coord): boolean {
+  if (state.runState !== 'active') return false;
+  const hero = getActiveHero(state.party);
+  if (state.castModeHeroId !== hero.id || !state.selectedSpellId) return false;
+  if (!canHeroActNow(state, hero.id)) return false;
+
+  const resources = state.turn?.heroResourcesById[hero.id];
+  if (state.turn && !resources?.attackSlotAvailable) return false;
+
+  const spell = SPELL_DEFINITIONS[state.selectedSpellId];
+  if (spell.targeting === 'ally') {
+    const ally = state.party.heroes.find(
+      (candidate) => candidate.roomId === hero.roomId && candidate.hp > 0 && sameCoord(candidate.tile, target),
+    );
+    if (!ally) return false;
+    if (!canHeroCastSpellOnHero(state, hero.id, ally.id)) return false;
+    const result = performHealSpell(hero, ally);
+    finalizeSpellCast(state, hero.id, result.logEntries);
+    return true;
+  }
+
+  const targetEnemy = getCurrentRoomEnemies(state).find((enemy) => enemy.hp > 0 && sameCoord(enemy.tile, target));
+  if (!targetEnemy) return false;
+
+  if (spell.id === 'ice') {
+    if (!canHeroCastSpellOnEnemy(state, hero.id, targetEnemy.id)) return false;
+    const result = performIceSpell(hero, targetEnemy);
+    finalizeSpellCast(state, hero.id, result.logEntries);
+    return true;
+  }
+
+  if (spell.id === 'fireball') {
+    if (!canHeroCastSpellOnEnemy(state, hero.id, targetEnemy.id)) return false;
+    const result = performFireballSpell(state, hero, target, getCurrentRoomEnemies(state));
+    finalizeSpellCast(state, hero.id, result.logEntries);
+    syncCombatTurnState(state);
+    return true;
+  }
+
+  return false;
+}
+
+export function canHeroCastSpellOnHero(state: GameState, heroId: string, targetHeroId: string): boolean {
+  const hero = state.party.heroes.find((candidate) => candidate.id === heroId);
+  const target = state.party.heroes.find((candidate) => candidate.id === targetHeroId);
+  if (!hero || !target || hero.hp <= 0 || target.hp <= 0) return false;
+  if (!canHeroCastSpells(hero)) return false;
+  if (state.castModeHeroId !== heroId || state.selectedSpellId !== 'heal') return false;
+  return hero.roomId === target.roomId && manhattanDistance(hero.tile, target.tile) <= SPELL_DEFINITIONS.heal.range;
+}
+
+export function canHeroCastSpellOnEnemy(state: GameState, heroId: string, enemyId: string): boolean {
+  const hero = state.party.heroes.find((candidate) => candidate.id === heroId);
+  const enemy = getCurrentRoomEnemies(state).find((candidate) => candidate.id === enemyId && candidate.hp > 0);
+  if (!hero || hero.hp <= 0 || !enemy) return false;
+  if (!canHeroCastSpells(hero)) return false;
+  if (state.castModeHeroId !== heroId || !state.selectedSpellId) return false;
+  const spell = SPELL_DEFINITIONS[state.selectedSpellId];
+  return manhattanDistance(hero.tile, enemy.tile) <= spell.range;
+}
+
+export function isEnemySpellTargetable(state: GameState, heroId: string, enemyId: string): boolean {
+  if (!state.selectedSpellId) return false;
+  const spell = SPELL_DEFINITIONS[state.selectedSpellId];
+  if (spell.targeting === 'ally') return false;
+  return canHeroCastSpellOnEnemy(state, heroId, enemyId);
+}
+
 /**
  * Enables/disables backpack consumable use mode for the active hero.
  * @param state Game state.
@@ -681,8 +857,11 @@ export function toggleItemUseMode(state: GameState): boolean {
   const hero = getActiveHero(state.party);
   if (!canUseActiveHeroConsumable(state)) return false;
   state.attackModeHeroId = null;
+  state.castModeHeroId = null;
+  state.selectedSpellId = null;
   state.movingPath = [];
   state.hoverPath = [];
+  state.spellPreviewTiles = [];
   state.itemUseModeHeroId = state.itemUseModeHeroId === hero.id ? null : hero.id;
   return state.itemUseModeHeroId === hero.id;
 }
@@ -714,6 +893,8 @@ export function useActiveHeroBackpackConsumable(state: GameState, itemId: string
     consumeHeroActionPoint(state, hero.id);
   }
   state.attackModeHeroId = null;
+  state.castModeHeroId = null;
+  state.selectedSpellId = null;
   state.itemUseModeHeroId = null;
   state.recentCombatLog.unshift(`${hero.className} used ${consumable.name} and restored ${consumable.value} HP`);
   state.recentCombatLog = state.recentCombatLog.slice(0, 6);
@@ -758,6 +939,24 @@ export function getRoomEncounter(room: RoomData): RoomEncounterState | null {
   return room.encounter;
 }
 
+export function isRoomObjectiveCleared(room: RoomData): boolean {
+  if (room.roomType === 'combat') {
+    return room.encounter !== null && room.encounter.isCleared;
+  }
+  if (room.roomType === 'treasure') {
+    return room.progress.hasBeenEntered && room.progress.hasBeenExited;
+  }
+  return true;
+}
+
+export function areAllRequiredRoomsCleared(dungeon: DungeonState): boolean {
+  for (const room of dungeon.rooms.values()) {
+    if (room.roomType === 'exit') continue;
+    if (!isRoomObjectiveCleared(room)) return false;
+  }
+  return true;
+}
+
 function isTileOccupiedByEnemy(state: GameState, roomId: string, coord: Coord): boolean {
   const roomEnemies = state.dungeon.enemiesByRoomId.get(roomId) ?? [];
   return roomEnemies.some((enemy) => enemy.hp > 0 && sameCoord(enemy.tile, coord));
@@ -769,8 +968,11 @@ export function setRunState(state: GameState, next: RunState): void {
     state.turn = null;
     state.turnAutomationReadyAt = null;
     state.hoverPath = [];
+    state.spellPreviewTiles = [];
     state.movingPath = [];
     state.attackModeHeroId = null;
+    state.castModeHeroId = null;
+    state.selectedSpellId = null;
     state.itemUseModeHeroId = null;
     state.readyByHeroId.clear();
   }
@@ -800,6 +1002,21 @@ export function getRunSummaryView(state: GameState): RunSummaryView {
     floorsReached: highestFloorReached,
     survivingHeroes: state.party.heroes.filter((hero) => hero.hp > 0).length,
   };
+}
+
+function finalizeSpellCast(state: GameState, heroId: string, logEntries: string[]): void {
+  const resources = state.turn?.heroResourcesById[heroId];
+  if (resources) {
+    resources.attackSlotAvailable = false;
+  }
+  state.recentCombatLog.unshift(...logEntries.reverse());
+  state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  state.castModeHeroId = null;
+  state.selectedSpellId = null;
+  state.attackModeHeroId = null;
+  state.hoverPath = [];
+  state.spellPreviewTiles = [];
+  state.movingPath = [];
 }
 
 function formatCombatLogEntry(

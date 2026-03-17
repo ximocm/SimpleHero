@@ -1,6 +1,7 @@
 import type { Coord, HeroClassName, HeroRaceName, HeroState } from '../data/dungeonTypes.js';
 import { CLASS_DEFINITIONS } from './classes.js';
 import { RACE_DEFINITIONS } from './races.js';
+import { equipHandItem } from '../systems/weaponSystem.js';
 
 export interface HeroBlueprint {
   className: HeroClassName;
@@ -67,23 +68,22 @@ export function createDefaultHeroes(roomId: string, startTiles: readonly Coord[]
 function applyStarterLoadout(hero: HeroState): HeroState {
   if (hero.className === 'Warrior') {
     hero.equipment.armor = 'heavy-armor';
-    hero.equipment.leftHand = 'short-sword';
-    hero.equipment.rightHand = 'shield';
+    equipHandItem(hero, 'leftHand', 'short-sword');
+    equipHandItem(hero, 'rightHand', 'shield');
     hero.equipment.backpack = ['health-potion'];
     return hero;
   }
 
   if (hero.className === 'Ranger') {
     hero.equipment.armor = 'light-armor';
-    hero.equipment.leftHand = 'bow';
-    hero.equipment.rightHand = 'bow';
+    equipHandItem(hero, 'leftHand', 'bow');
     hero.equipment.backpack = ['health-potion'];
     return hero;
   }
 
   hero.equipment.armor = 'light-armor';
-  hero.equipment.leftHand = 'staff';
-  hero.equipment.rightHand = 'basic-spellbook';
+  equipHandItem(hero, 'leftHand', 'staff');
+  equipHandItem(hero, 'rightHand', 'basic-spellbook');
   hero.equipment.backpack = ['health-potion'];
   return hero;
 }

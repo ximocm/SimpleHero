@@ -25,8 +25,6 @@ import { findPathAStar } from '../utils/pathfinding.js';
 import { createDungeonState, getRoomAt } from './dungeonStateSystem.js';
 import { createParty, getActiveHero, setActiveHero } from './partySystem.js';
 import {
-  canHeroCastSpells,
-  getHeroAttackRange,
   getHeroAvailableSpellIds,
   performFireballSpell,
   performHealSpell,
@@ -35,6 +33,7 @@ import {
 } from './combatSystem.js';
 import { CONSUMABLE_DEFINITIONS } from '../items/consumables.js';
 import { SPELL_DEFINITIONS } from '../magic/spells.js';
+import { canHeroCastSpells, getHeroAttackRange } from './weaponSystem.js';
 import {
   canHeroActNow,
   canSelectHeroThisPhase,

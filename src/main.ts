@@ -34,7 +34,14 @@ import {
   updateHoverPath,
   useActiveHeroBackpackConsumable,
 } from './systems/gameSystem.js';
-import { getFireballAreaTiles, getHeroAttackProfile, getHeroCastRequirementView } from './systems/combatSystem.js';
+import { getFireballAreaTiles } from './systems/combatSystem.js';
+import {
+  equipHandItem,
+  getHandItemHandsRequired,
+  getHeroAttackProfile,
+  getHeroCastRequirementView,
+  takeHandItem,
+} from './systems/weaponSystem.js';
 import { SPELL_DEFINITIONS } from './magic/spells.js';
 import { advanceAutomatedTurns, getTurnBannerView, isCurrentTurnHero, passTurn } from './systems/turnSystem.js';
 import {
@@ -933,17 +940,11 @@ function removeFromSource(payload: DragPayload): boolean {
   if (!hero) return false;
 
   if (payload.source === 'slot') {
+    if (payload.slot === 'leftHand' || payload.slot === 'rightHand') {
+      return takeHandItem(hero, payload.slot, payload.itemId) !== null;
+    }
     if (hero.equipment[payload.slot] !== payload.itemId) return false;
     hero.equipment[payload.slot] = null;
-    if (
-      (payload.slot === 'leftHand' || payload.slot === 'rightHand') &&
-      getHandsRequired(payload.itemId) === 2
-    ) {
-      const other = payload.slot === 'leftHand' ? 'rightHand' : 'leftHand';
-      if (hero.equipment[other] === payload.itemId) {
-        hero.equipment[other] = null;
-      }
-    }
     return true;
   }
 
@@ -963,6 +964,10 @@ function returnToSource(payload: DragPayload): void {
   if (!hero) return;
 
   if (payload.source === 'slot') {
+    if (payload.slot === 'leftHand' || payload.slot === 'rightHand') {
+      equipHandItem(hero, payload.slot, payload.itemId);
+      return;
+    }
     hero.equipment[payload.slot] = payload.itemId;
     return;
   }
@@ -1008,46 +1013,14 @@ function equipInHandSlot(
   slot: 'leftHand' | 'rightHand',
   itemId: string,
 ): void {
-  const handsRequired = getHandsRequired(itemId);
-  const other = slot === 'leftHand' ? 'rightHand' : 'leftHand';
-
-  if (handsRequired === 2) {
-    clearHandSlot(hero, 'leftHand', itemId);
-    clearHandSlot(hero, 'rightHand', itemId);
-    hero.equipment.leftHand = itemId;
-    hero.equipment.rightHand = itemId;
-    return;
+  const displacedItems = equipHandItem(hero, slot, itemId);
+  for (const displacedItem of displacedItems) {
+    if (displacedItem !== itemId) addInventory(displacedItem);
   }
-
-  const otherItem = hero.equipment[other];
-  if (otherItem && getHandsRequired(otherItem) === 2) {
-    clearHandSlot(hero, 'leftHand');
-    clearHandSlot(hero, 'rightHand');
-  }
-
-  clearHandSlot(hero, slot);
-  hero.equipment[slot] = itemId;
-}
-
-function clearHandSlot(
-  hero: (typeof state.party.heroes)[number],
-  slot: 'leftHand' | 'rightHand',
-  ignoreItemId?: string,
-): void {
-  const current = hero.equipment[slot];
-  if (!current) return;
-  hero.equipment[slot] = null;
-  if (ignoreItemId && current === ignoreItemId) return;
-  addInventory(current);
 }
 
 function getHandsRequired(itemId: string): number {
-  const item = itemById.get(itemId);
-  if (!item) return 1;
-  if (item.category === 'weapon') return item.handsRequired;
-  if (item.category === 'spellbook') return item.handsRequired;
-  if (item.id === 'shield') return item.handsRequired ?? 1;
-  return 0;
+  return getHandItemHandsRequired(itemId);
 }
 
 function getItemTooltip(itemId: string): string {

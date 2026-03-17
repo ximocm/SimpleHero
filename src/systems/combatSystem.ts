@@ -2,25 +2,17 @@ import type { CombatRollSnapshot, Coord, EnemyState, HeroState, SpellId } from '
 import { SPELL_DEFINITIONS } from '../magic/spells.js';
 import { SPELLBOOK_DEFINITIONS } from '../items/spellbooks.js';
 import { ARMOR_DEFINITIONS } from '../items/armors.js';
-import { WEAPON_DEFINITIONS } from '../items/weapons.js';
 import type { GameState } from './gameSystem.js';
-
-const UNARMED_ATTACK = {
-  range: 1,
-  attackDice: 1,
-  damage: 1,
-};
+import {
+  getEquippedWeapon,
+  getHeroAttackProfile,
+  getHeroCastRequirementView,
+  type CastRequirementView,
+} from './weaponSystem.js';
 
 export interface AttackResult {
   roll: CombatRollSnapshot;
   defenderDefeated: boolean;
-}
-
-export interface CastRequirementView {
-  spellbookId: keyof typeof SPELLBOOK_DEFINITIONS | null;
-  spellbookName: string | null;
-  focusItemId: keyof typeof WEAPON_DEFINITIONS | null;
-  focusName: string | null;
 }
 
 export interface SpellCastResult {
@@ -35,7 +27,7 @@ export interface SpellCastResult {
  * @returns Attack result snapshot.
  */
 export function performHeroAttack(state: GameState, hero: HeroState, enemy: EnemyState): AttackResult {
-  const weapon = getEquippedWeapon(hero);
+  const weapon = getHeroAttackProfile(hero);
   const roll = resolveAttack(
     state,
     hero.id,
@@ -74,116 +66,10 @@ export function performEnemyAttack(state: GameState, enemy: EnemyState, hero: He
   return { roll, defenderDefeated: defeated };
 }
 
-/**
- * Returns the selected hero's current weapon range.
- * @param hero Hero to inspect.
- * @returns Basic attack range.
- */
-export function getHeroAttackRange(hero: HeroState): number {
-  return getEquippedWeapon(hero).range;
-}
-
-function resolveAttack(
-  state: GameState,
-  attackerId: string,
-  defenderId: string,
-  attackDice: number,
-  weaponDamage: number,
-  defenseDiceBonus: number,
-): CombatRollSnapshot {
-  const attackRolls = Array.from({ length: attackDice }, () => rollD6(state));
-  const attackHits = attackRolls.map(convertDieToHits);
-  const totalAttackHits = attackHits.reduce((sum, value) => sum + value, 0);
-
-  const defenseDiceTotal = Math.max(1, 1 + defenseDiceBonus);
-  const defenseRolls = Array.from({ length: defenseDiceTotal }, () => rollD6(state));
-  const blockedHits = defenseRolls.map(convertDieToHits);
-  const totalBlockedHits = blockedHits.reduce((sum, value) => sum + value, 0);
-  const effectiveHits = Math.max(0, totalAttackHits - totalBlockedHits);
-  const finalDamage = effectiveHits === 0 ? 0 : weaponDamage + (effectiveHits - 1);
-
-  return {
-    attackerId,
-    defenderId,
-    attackRolls,
-    attackHits,
-    defenseRolls,
-    blockedHits,
-    totalAttackHits,
-    totalBlockedHits,
-    effectiveHits,
-    finalDamage,
-  };
-}
-
-function getEquippedWeapon(hero: HeroState): { range: number; attackDice: number; damage: number } {
-  const candidates = [hero.equipment.rightHand, hero.equipment.leftHand].filter(
-    (itemId): itemId is keyof typeof WEAPON_DEFINITIONS =>
-      typeof itemId === 'string' && Object.prototype.hasOwnProperty.call(WEAPON_DEFINITIONS, itemId),
-  );
-  const weaponId = candidates[0];
-  return weaponId ? WEAPON_DEFINITIONS[weaponId] : UNARMED_ATTACK;
-}
-
-export function getHeroAttackProfile(hero: HeroState): {
-  label: string;
-  range: number;
-  attackDice: number;
-  damage: number;
-} {
-  const candidates = [hero.equipment.rightHand, hero.equipment.leftHand].filter(
-    (itemId): itemId is keyof typeof WEAPON_DEFINITIONS =>
-      typeof itemId === 'string' && Object.prototype.hasOwnProperty.call(WEAPON_DEFINITIONS, itemId),
-  );
-  const weaponId = candidates[0];
-  if (!weaponId) {
-    return {
-      label: 'Unarmed',
-      ...UNARMED_ATTACK,
-    };
-  }
-
-  const weapon = WEAPON_DEFINITIONS[weaponId];
-  return {
-    label: weapon.name,
-    range: weapon.range,
-    attackDice: weapon.attackDice,
-    damage: weapon.damage,
-  };
-}
-
-export function getHeroCastRequirementView(hero: HeroState): CastRequirementView {
-  const leftIsSpellbook =
-    hero.equipment.leftHand &&
-    Object.prototype.hasOwnProperty.call(SPELLBOOK_DEFINITIONS, hero.equipment.leftHand)
-      ? (hero.equipment.leftHand as keyof typeof SPELLBOOK_DEFINITIONS)
-      : null;
-  const rightIsSpellbook =
-    hero.equipment.rightHand &&
-    Object.prototype.hasOwnProperty.call(SPELLBOOK_DEFINITIONS, hero.equipment.rightHand)
-      ? (hero.equipment.rightHand as keyof typeof SPELLBOOK_DEFINITIONS)
-      : null;
-
-  const spellbookId = leftIsSpellbook ?? rightIsSpellbook;
-  const focusItemId = getEquippedCastingFocusId(hero, spellbookId);
-
-  return {
-    spellbookId,
-    spellbookName: spellbookId ? SPELLBOOK_DEFINITIONS[spellbookId].name : null,
-    focusItemId,
-    focusName: focusItemId ? WEAPON_DEFINITIONS[focusItemId].name : null,
-  };
-}
-
 export function getHeroAvailableSpellIds(hero: HeroState): SpellId[] {
   const requirements = getHeroCastRequirementView(hero);
   if (!requirements.spellbookId || !requirements.focusItemId) return [];
   return [...SPELLBOOK_DEFINITIONS[requirements.spellbookId].spellIds];
-}
-
-export function canHeroCastSpells(hero: HeroState): boolean {
-  const requirements = getHeroCastRequirementView(hero);
-  return hero.className === 'Mage' && Boolean(requirements.spellbookId && requirements.focusItemId);
 }
 
 export function performHealSpell(hero: HeroState, target: HeroState): SpellCastResult {
@@ -252,30 +138,41 @@ function getHeroDefenseDiceBonus(hero: HeroState): number {
   return bonus;
 }
 
-function getEquippedCastingFocusId(
-  hero: HeroState,
-  spellbookId: keyof typeof SPELLBOOK_DEFINITIONS | null,
-): keyof typeof WEAPON_DEFINITIONS | null {
-  const focusCandidates = [
-    spellbookId && hero.equipment.leftHand === spellbookId ? hero.equipment.rightHand : hero.equipment.leftHand,
-    spellbookId && hero.equipment.rightHand === spellbookId ? hero.equipment.leftHand : hero.equipment.rightHand,
-  ];
-
-  for (const itemId of focusCandidates) {
-    if (
-      typeof itemId === 'string' &&
-      Object.prototype.hasOwnProperty.call(WEAPON_DEFINITIONS, itemId) &&
-      WEAPON_DEFINITIONS[itemId as keyof typeof WEAPON_DEFINITIONS].castingFocus
-    ) {
-      return itemId as keyof typeof WEAPON_DEFINITIONS;
-    }
-  }
-
-  return null;
-}
-
 function getEnemyDefenseDiceBonus(enemy: EnemyState): number {
   return enemy.defenseDiceBonus;
+}
+
+function resolveAttack(
+  state: GameState,
+  attackerId: string,
+  defenderId: string,
+  attackDice: number,
+  weaponDamage: number,
+  defenseDiceBonus: number,
+): CombatRollSnapshot {
+  const attackRolls = Array.from({ length: attackDice }, () => rollD6(state));
+  const attackHits = attackRolls.map(convertDieToHits);
+  const totalAttackHits = attackHits.reduce((sum, value) => sum + value, 0);
+
+  const defenseDiceTotal = Math.max(1, 1 + defenseDiceBonus);
+  const defenseRolls = Array.from({ length: defenseDiceTotal }, () => rollD6(state));
+  const blockedHits = defenseRolls.map(convertDieToHits);
+  const totalBlockedHits = blockedHits.reduce((sum, value) => sum + value, 0);
+  const effectiveHits = Math.max(0, totalAttackHits - totalBlockedHits);
+  const finalDamage = effectiveHits === 0 ? 0 : weaponDamage + (effectiveHits - 1);
+
+  return {
+    attackerId,
+    defenderId,
+    attackRolls,
+    attackHits,
+    defenseRolls,
+    blockedHits,
+    totalAttackHits,
+    totalBlockedHits,
+    effectiveHits,
+    finalDamage,
+  };
 }
 
 function convertDieToHits(roll: number): number {

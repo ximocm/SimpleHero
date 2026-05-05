@@ -2,6 +2,8 @@ import type { CombatRollSnapshot, Coord, EnemyState, HeroState, SpellId } from '
 import { SPELL_DEFINITIONS } from '../magic/spells.js';
 import { SPELLBOOK_DEFINITIONS } from '../items/spellbooks.js';
 import { ARMOR_DEFINITIONS } from '../items/armors.js';
+import { SKILL_DEFINITIONS } from '../heroes/skills.js';
+import type { SkillId } from '../data/skillTypes.js';
 import type { GameState } from './gameSystem.js';
 import {
   getEquippedWeapon,
@@ -16,6 +18,10 @@ export interface AttackResult {
 }
 
 export interface SpellCastResult {
+  logEntries: string[];
+}
+
+export interface SkillUseResult {
   logEntries: string[];
 }
 
@@ -38,9 +44,21 @@ export function performHeroAttack(state: GameState, hero: HeroState, enemy: Enem
   );
 
   enemy.hp = Math.max(0, enemy.hp - roll.finalDamage);
+  hero.skillEffects.powerStrikeDamageBonus = 0;
   const defeated = enemy.hp === 0;
   if (defeated) handleEnemyDefeat(state, enemy);
   return { roll, defenderDefeated: defeated };
+}
+
+export function performHeroSkillOnSelf(hero: HeroState, skillId: SkillId): SkillUseResult {
+  if (skillId === 'power-strike') {
+    hero.skillEffects.powerStrikeDamageBonus = 3;
+    return { logEntries: [`${hero.className} used ${SKILL_DEFINITIONS[skillId].name} (+3 next basic attack)`] };
+  }
+  if (skillId === 'dash') {
+    return { logEntries: [`${hero.className} used ${SKILL_DEFINITIONS[skillId].name} (+2 movement this turn)`] };
+  }
+  return { logEntries: [`${hero.className} used ${SKILL_DEFINITIONS[skillId].name}`] };
 }
 
 /**
@@ -159,7 +177,9 @@ function resolveAttack(
   const blockedHits = defenseRolls.map(convertDieToHits);
   const totalBlockedHits = blockedHits.reduce((sum, value) => sum + value, 0);
   const effectiveHits = Math.max(0, totalAttackHits - totalBlockedHits);
-  const finalDamage = effectiveHits === 0 ? 0 : weaponDamage + (effectiveHits - 1);
+  const hero = state.party.heroes.find((candidate) => candidate.id === attackerId);
+  const skillBonus = hero ? hero.skillEffects.powerStrikeDamageBonus : 0;
+  const finalDamage = effectiveHits === 0 ? 0 : weaponDamage + (effectiveHits - 1) + skillBonus;
 
   return {
     attackerId,

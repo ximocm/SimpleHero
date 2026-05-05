@@ -38,3 +38,18 @@ Alternative one-shot command:
 ```bash
 npm run dev
 ```
+
+
+## GitHub Pages
+
+This project can be deployed as a static site on GitHub Pages.
+
+1. Build the project:
+
+```bash
+npm run build
+```
+
+2. In your repository settings, set **Pages** to deploy from the branch that contains this repository root (for example, `main` / `/root`).
+
+3. GitHub Pages will serve `index.html` from the repo root, which loads `./dist/main.js` with a relative path compatible with project pages.

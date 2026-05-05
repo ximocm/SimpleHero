@@ -35,7 +35,9 @@ export function syncCombatTurnState(state: GameState): void {
     state.turnAutomationReadyAt = null;
     state.attackModeHeroId = null;
     state.castModeHeroId = null;
+    state.skillModeHeroId = null;
     state.selectedSpellId = null;
+    state.selectedSkillId = null;
     return;
   }
   const room = state.dungeon.rooms.get(state.dungeon.currentRoomId);
@@ -44,7 +46,9 @@ export function syncCombatTurnState(state: GameState): void {
     state.turnAutomationReadyAt = null;
     state.attackModeHeroId = null;
     state.castModeHeroId = null;
+    state.skillModeHeroId = null;
     state.selectedSpellId = null;
+    state.selectedSkillId = null;
     return;
   }
 
@@ -311,7 +315,15 @@ function beginEnemyPhase(state: GameState): void {
   state.movingPath = [];
   state.attackModeHeroId = null;
   state.castModeHeroId = null;
+  state.skillModeHeroId = null;
   state.selectedSpellId = null;
+  state.selectedSkillId = null;
+  for (const hero of state.party.heroes) {
+    for (const key of Object.keys(hero.skillCooldowns)) {
+      const k = key as keyof typeof hero.skillCooldowns;
+      hero.skillCooldowns[k] = Math.max(0, (hero.skillCooldowns[k] ?? 0) - 1);
+    }
+  }
 }
 
 function beginHeroPhase(state: GameState): void {

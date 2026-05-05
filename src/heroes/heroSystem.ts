@@ -50,6 +50,10 @@ export function createHero(
     roomId,
     tile: { ...spawnTile },
     facing: 'S',
+    skillCooldowns: {},
+    skillEffects: {
+      powerStrikeDamageBonus: 0,
+    },
   };
 }
 

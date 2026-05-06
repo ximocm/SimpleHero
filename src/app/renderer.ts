@@ -2,6 +2,7 @@ import type { Coord } from '../data/dungeonTypes.js';
 import { TileType } from '../data/tileTypes.js';
 import { SPELL_DEFINITIONS } from '../magic/spells.js';
 import {
+  canWalkTile,
   canHeroBasicAttackEnemy,
   canHeroCastSpellOnHero,
   canUseActiveHeroConsumable,
@@ -26,6 +27,7 @@ import { getPauseMenuOverlayHtml, getRunCompleteOverlayHtml, getStartMenuOverlay
 import { renderCharacterPanelsHtml, renderCombatLogHtml, renderPartyInventoryHtml } from '../ui/sidebarViews.js';
 import type { InventoryEntry } from '../items/inventory.js';
 import type { AppMode, OverlayMode } from './types.js';
+import { coordKey, neighbors4 } from '../utils/grid.js';
 
 export interface AppRenderRefs {
   canvas: HTMLCanvasElement;
@@ -206,7 +208,7 @@ export function drawFrame(args: FrameRenderArgs): void {
   }
 
   if (args.appMode === 'game' && args.overlayMode === null && state.runState === 'active' && activeHero && activeHero.hp > 0) {
-    drawAttackRangeOverlay(ctx, room, activeHero.tile, getHeroAttackProfile(activeHero).range, tileSize, offset);
+    drawTacticalPreviewOverlay(state, ctx, room, activeHero, tileSize, offset);
   }
 
   for (const step of state.hoverPath) {
@@ -292,35 +294,138 @@ export function drawFrame(args: FrameRenderArgs): void {
   drawMinimap(args, minimapCtx);
 }
 
-function drawAttackRangeOverlay(
+function drawTacticalPreviewOverlay(
+  state: GameState,
   ctx: CanvasRenderingContext2D,
   room: ReturnType<typeof getCurrentRoom>,
-  origin: Coord,
-  range: number,
+  hero: GameState['party']['heroes'][number],
   tileSize: number,
   offset: Coord,
 ): void {
-  if (range <= 0) return;
+  const moveTiles = getReachableMoveTiles(state, room, hero);
+  const attackTiles = getAttackRangeTiles(room, hero.tile, getHeroAttackProfile(hero).range);
+
+  if (moveTiles.size === 0 && attackTiles.size === 0) return;
 
   for (let y = 0; y < room.height; y += 1) {
     for (let x = 0; x < room.width; x += 1) {
       const tile = room.tiles[y][x];
       if (tile === TileType.VOID_BLACK) continue;
-
-      const distance = Math.abs(origin.x - x) + Math.abs(origin.y - y);
-      if (distance === 0 || distance > range) continue;
+      if (x === hero.tile.x && y === hero.tile.y) continue;
 
       const px = offset.x + x * tileSize;
       const py = offset.y + y * tileSize;
-      const intensity = 1 - (distance - 1) / Math.max(range, 1);
+      const key = coordKey({ x, y });
+      const isMoveTile = moveTiles.has(key);
+      const isAttackTile = attackTiles.has(key);
+      if (!isMoveTile && !isAttackTile) continue;
 
-      ctx.fillStyle = `rgba(251, 191, 36, ${0.08 + intensity * 0.12})`;
+      if (isMoveTile && isAttackTile) {
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.24)';
+        ctx.strokeStyle = 'rgba(196, 181, 253, 0.55)';
+      } else if (isMoveTile) {
+        ctx.fillStyle = 'rgba(125, 211, 252, 0.24)';
+        ctx.strokeStyle = 'rgba(186, 230, 253, 0.48)';
+      } else {
+        ctx.fillStyle = 'rgba(248, 113, 113, 0.22)';
+        ctx.strokeStyle = 'rgba(252, 165, 165, 0.45)';
+      }
+
       ctx.fillRect(px + 2, py + 2, tileSize - 4, tileSize - 4);
-      ctx.strokeStyle = `rgba(253, 224, 71, ${0.1 + intensity * 0.2})`;
       ctx.lineWidth = 1;
       ctx.strokeRect(px + 3.5, py + 3.5, tileSize - 7, tileSize - 7);
     }
   }
+}
+
+function getReachableMoveTiles(
+  state: GameState,
+  room: ReturnType<typeof getCurrentRoom>,
+  hero: GameState['party']['heroes'][number],
+): Set<string> {
+  const turnResources =
+    state.turn?.phase === 'heroes' && state.party.heroes[state.party.activeHeroIndex]?.id === hero.id
+      ? state.turn.heroResourcesById[hero.id]
+      : null;
+  const movementRemaining = Math.max(0, turnResources?.movementRemaining ?? 0);
+  if (movementRemaining <= 0 || state.readyByHeroId.has(hero.id)) {
+    return new Set();
+  }
+
+  const visited = new Map<string, number>([[coordKey(hero.tile), 0]]);
+  const reachable = new Set<string>();
+  const queue: Array<{ coord: Coord; steps: number }> = [{ coord: hero.tile, steps: 0 }];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+
+    for (const next of neighbors4(current.coord)) {
+      const nextSteps = current.steps + 1;
+      const nextKey = coordKey(next);
+      if (nextSteps > movementRemaining) continue;
+      if (!canWalkTile(room, next)) continue;
+      if (isPreviewTileOccupiedByOtherHero(state, room.id, next, hero.id)) continue;
+      if (isPreviewTileOccupiedByEnemy(state, room.id, next)) continue;
+
+      const knownSteps = visited.get(nextKey);
+      if (knownSteps !== undefined && knownSteps <= nextSteps) continue;
+
+      visited.set(nextKey, nextSteps);
+      reachable.add(nextKey);
+      queue.push({ coord: next, steps: nextSteps });
+    }
+  }
+
+  return reachable;
+}
+
+function getAttackRangeTiles(
+  room: ReturnType<typeof getCurrentRoom>,
+  origin: Coord,
+  range: number,
+): Set<string> {
+  const attackTiles = new Set<string>();
+  if (range <= 0) return attackTiles;
+
+  for (let y = 0; y < room.height; y += 1) {
+    for (let x = 0; x < room.width; x += 1) {
+      if (room.tiles[y][x] === TileType.VOID_BLACK) continue;
+
+      const distance = Math.abs(origin.x - x) + Math.abs(origin.y - y);
+      if (distance === 0 || distance > range) continue;
+
+      attackTiles.add(coordKey({ x, y }));
+    }
+  }
+
+  return attackTiles;
+}
+
+function isPreviewTileOccupiedByOtherHero(
+  state: GameState,
+  roomId: string,
+  coord: Coord,
+  currentHeroId: string,
+): boolean {
+  return state.party.heroes.some(
+    (candidate) =>
+      candidate.id !== currentHeroId &&
+      candidate.hp > 0 &&
+      !state.readyByHeroId.has(candidate.id) &&
+      candidate.roomId === roomId &&
+      candidate.tile.x === coord.x &&
+      candidate.tile.y === coord.y,
+  );
+}
+
+function isPreviewTileOccupiedByEnemy(
+  state: GameState,
+  roomId: string,
+  coord: Coord,
+): boolean {
+  const roomEnemies = state.dungeon.enemiesByRoomId.get(roomId) ?? [];
+  return roomEnemies.some((enemy) => enemy.hp > 0 && enemy.tile.x === coord.x && enemy.tile.y === coord.y);
 }
 
 export function getTileSize(state: GameState, canvas: HTMLCanvasElement, hudHeight: number): number {

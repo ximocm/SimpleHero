@@ -45,7 +45,7 @@ import { getAppLayoutHtml, requireContext, requireElement } from '../ui/layout.j
 import { inBounds, tileFromCanvas } from '../utils/grid.js';
 import { InventoryController } from './inventoryController.js';
 import { drawFrame, getBoardOffset, getTileSize, renderAppMode, renderCastMenu, renderCharacterPanels, renderCombatLog, renderPartyInventory, type AppRenderRefs } from './renderer.js';
-import type { AppMode, CampaignProfile, DragPayload, HeroDraft, OverlayMode } from './types.js';
+import { COMBAT_ROLL_ANIMATION_TOTAL_MS, type AppMode, type CampaignProfile, type CombatRollAnimationState, type DragPayload, type HeroDraft, type OverlayMode } from './types.js';
 import { ITEM_DEFINITIONS } from '../items/items.js';
 import { getShopPrice } from '../items/shop.js';
 import { getCharacterCreationOverlayHtml, getSafeZoneOverlayHtml, getStartMenuOverlayHtml } from '../ui/overlayViews.js';
@@ -74,6 +74,8 @@ export class AppController {
   private safeZoneHeroIndex = 0;
   private appMode: AppMode;
   private overlayMode: OverlayMode = null;
+  private diceAnimation: CombatRollAnimationState | null = null;
+  private lastObservedCombatRoll: GameState['lastCombatRoll'] = null;
   private lastMoveStepAt = 0;
   private readonly inventoryController: InventoryController;
   private readonly refs: AppRenderRefs;
@@ -89,6 +91,7 @@ export class AppController {
     this.state = restoredState ?? createGameState(Date.now());
     this.partyInventory = restoredInventory ?? createStarterPartyInventory();
     this.appMode = restoredState ? (restoredState.runState === 'active' ? 'game' : 'run-complete') : 'menu';
+    this.lastObservedCombatRoll = this.state.lastCombatRoll;
 
     const app = document.querySelector<HTMLDivElement>('#app');
     if (!app) throw new Error('Missing #app root');
@@ -225,6 +228,7 @@ export class AppController {
     this.appMode = this.state.runState === 'active' ? 'game' : 'run-complete';
     this.overlayMode = null;
     this.lastMoveStepAt = 0;
+    this.resetCombatRollPresentation();
     this.syncAccountGoldFromState();
     this.renderAll();
     this.renderAppMode();
@@ -238,6 +242,7 @@ export class AppController {
     this.appMode = 'menu';
     this.overlayMode = null;
     this.lastMoveStepAt = 0;
+    this.resetCombatRollPresentation();
     this.renderAll();
     this.renderAppMode();
   }
@@ -550,6 +555,7 @@ export class AppController {
     this.appMode = 'game';
     this.overlayMode = null;
     this.lastMoveStepAt = 0;
+    this.resetCombatRollPresentation();
     this.renderAll();
     this.persistAll();
     this.renderAppMode();
@@ -796,14 +802,17 @@ export class AppController {
   }
 
   private tick(): void {
+    const now = performance.now();
     if (this.appMode === 'game' && this.overlayMode === null) {
-      const now = performance.now();
+      this.updateCombatRollAnimation(now);
       ensureActiveHeroIsLiving(this.state);
-      const advancedTurn = advanceAutomatedTurns(this.state, now);
+      const enemyAutomationBlocked = this.diceAnimation !== null && this.state.turn?.phase === 'enemies';
+      const advancedTurn = enemyAutomationBlocked ? false : advanceAutomatedTurns(this.state, now);
       const moved = now - this.lastMoveStepAt >= MOVE_STEP_INTERVAL_MS ? stepMovement(this.state) : false;
       if (moved) {
         this.lastMoveStepAt = now;
       }
+      this.updateCombatRollAnimation(now);
       if (advancedTurn || moved) {
         this.persistAll();
         this.renderAll();
@@ -835,7 +844,9 @@ export class AppController {
       refs: this.refs,
       ctx: this.ctx,
       minimapCtx: this.minimapCtx,
+      diceAnimation: this.diceAnimation,
       hudHeight: HUD_HEIGHT,
+      nowMs: now,
       showFullDungeonMap: SHOW_FULL_DUNGEON_MAP,
       getItemTooltip: (itemId) => this.inventoryController.getItemTooltip(itemId),
     });
@@ -857,5 +868,52 @@ export class AppController {
     if (this.appMode !== 'menu') {
       persistGameState(this.state);
     }
+  }
+
+  private resetCombatRollPresentation(): void {
+    this.lastObservedCombatRoll = this.state.lastCombatRoll;
+    this.diceAnimation = null;
+  }
+
+  private updateCombatRollAnimation(now: number): void {
+    const currentRoll = this.state.lastCombatRoll;
+    if (currentRoll && currentRoll !== this.lastObservedCombatRoll) {
+      this.lastObservedCombatRoll = currentRoll;
+      this.diceAnimation = {
+        roll: currentRoll,
+        attackerLabel: this.getCombatantLabel(currentRoll.attackerId),
+        defenderLabel: this.getCombatantLabel(currentRoll.defenderId),
+        startedAt: now,
+        endsAt: now + COMBAT_ROLL_ANIMATION_TOTAL_MS,
+      };
+      return;
+    }
+
+    if (!currentRoll) {
+      this.lastObservedCombatRoll = null;
+    }
+
+    if (this.diceAnimation && now >= this.diceAnimation.endsAt) {
+      this.diceAnimation = null;
+    }
+  }
+
+  private getCombatantLabel(unitId: string): string {
+    const hero = this.state.party.heroes.find((candidate) => candidate.id === unitId);
+    if (hero) {
+      return `${hero.name} (${hero.className})`;
+    }
+
+    for (const roomEnemies of this.state.dungeon.enemiesByRoomId.values()) {
+      const enemy = roomEnemies.find((candidate) => candidate.id === unitId);
+      if (enemy) {
+        return enemy.kind
+          .split('-')
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' ');
+      }
+    }
+
+    return unitId;
   }
 }

@@ -26,8 +26,16 @@ import { getHeroAttackProfile, getHeroCastRequirementView } from '../systems/wea
 import { getPauseMenuOverlayHtml, getRunCompleteOverlayHtml, getStartMenuOverlayHtml } from '../ui/overlayViews.js';
 import { renderCharacterPanelsHtml, renderCombatLogHtml, renderPartyInventoryHtml } from '../ui/sidebarViews.js';
 import type { InventoryEntry } from '../items/inventory.js';
-import type { AppMode, OverlayMode } from './types.js';
+import { COMBAT_ROLL_ANIMATION_TOTAL_MS, type AppMode, type CombatRollAnimationState, type OverlayMode } from './types.js';
 import { coordKey, neighbors4 } from '../utils/grid.js';
+
+const COMBAT_ROLL_INTRO_MS = 250;
+const COMBAT_ROLL_ATTACK_MS = 900;
+const COMBAT_ROLL_ATTACK_PAUSE_MS = 250;
+const COMBAT_ROLL_DEFENSE_MS = 900;
+const COMBAT_ROLL_DEFENSE_PAUSE_MS = 250;
+const COMBAT_ROLL_COMPARISON_MS = 450;
+const COMBAT_ROLL_DAMAGE_MS = 600;
 
 export interface AppRenderRefs {
   canvas: HTMLCanvasElement;
@@ -58,7 +66,9 @@ export interface FrameRenderArgs {
   refs: AppRenderRefs;
   ctx: CanvasRenderingContext2D;
   minimapCtx: CanvasRenderingContext2D;
+  diceAnimation: CombatRollAnimationState | null;
   hudHeight: number;
+  nowMs: number;
   showFullDungeonMap: boolean;
   getItemTooltip: (itemId: string) => string;
 }
@@ -292,6 +302,9 @@ export function drawFrame(args: FrameRenderArgs): void {
   });
 
   drawHud(args);
+  if (args.appMode === 'game' && args.diceAnimation) {
+    drawCombatRollOverlay(args);
+  }
   drawMinimap(args, minimapCtx);
 }
 
@@ -534,6 +547,98 @@ function drawHud(args: FrameRenderArgs): void {
   refs.skipTurnButton.textContent = 'skip turn';
 }
 
+function drawCombatRollOverlay(args: FrameRenderArgs): void {
+  const animation = args.diceAnimation;
+  if (!animation) return;
+
+  const elapsed = Math.max(0, args.nowMs - animation.startedAt);
+  if (elapsed >= COMBAT_ROLL_ANIMATION_TOTAL_MS) return;
+
+  const fadeIn = Math.min(1, elapsed / 120);
+  const fadeOut = Math.min(1, (COMBAT_ROLL_ANIMATION_TOTAL_MS - elapsed) / 220);
+  const alpha = Math.max(0, Math.min(fadeIn, fadeOut));
+  const panelWidth = Math.min(args.refs.canvas.width - 80, 700);
+  const panelHeight = 208;
+  const panelX = Math.floor((args.refs.canvas.width - panelWidth) / 2);
+  const panelY = 20;
+  const title = `${animation.attackerLabel} attacks ${animation.defenderLabel}`;
+
+  const attackStart = COMBAT_ROLL_INTRO_MS;
+  const attackEnd = attackStart + COMBAT_ROLL_ATTACK_MS;
+  const defenseStart = attackEnd + COMBAT_ROLL_ATTACK_PAUSE_MS;
+  const defenseEnd = defenseStart + COMBAT_ROLL_DEFENSE_MS;
+  const comparisonStart = defenseEnd + COMBAT_ROLL_DEFENSE_PAUSE_MS;
+  const damageStart = comparisonStart + COMBAT_ROLL_COMPARISON_MS;
+
+  args.ctx.save();
+  args.ctx.globalAlpha = alpha;
+  args.ctx.fillStyle = 'rgba(2, 6, 23, 0.96)';
+  args.ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+  args.ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+  args.ctx.lineWidth = 2;
+  args.ctx.strokeRect(panelX + 1, panelY + 1, panelWidth - 2, panelHeight - 2);
+
+  args.ctx.fillStyle = '#f8fafc';
+  args.ctx.font = 'bold 20px sans-serif';
+  args.ctx.textAlign = 'center';
+  args.ctx.textBaseline = 'top';
+  args.ctx.fillText(title, panelX + panelWidth / 2, panelY + 16);
+
+  args.ctx.fillStyle = '#94a3b8';
+  args.ctx.font = '13px sans-serif';
+  args.ctx.fillText(getCombatRollStageLabel(elapsed, defenseStart, comparisonStart, damageStart), panelX + panelWidth / 2, panelY + 44);
+
+  drawDiceRow(args.ctx, {
+    x: panelX + 24,
+    y: panelY + 72,
+    label: 'Attack',
+    rolls: animation.roll.attackRolls,
+    resolvedValues: animation.roll.attackHits,
+    color: '#f97316',
+    stageProgress: getStageProgress(elapsed, attackStart, COMBAT_ROLL_ATTACK_MS),
+    nowMs: args.nowMs,
+    resolvedLabelPrefix: 'hit',
+  });
+
+  if (elapsed >= defenseStart - 120) {
+    drawDiceRow(args.ctx, {
+      x: panelX + 24,
+      y: panelY + 126,
+      label: 'Defense',
+      rolls: animation.roll.defenseRolls,
+      resolvedValues: animation.roll.blockedHits,
+      color: '#38bdf8',
+      stageProgress: getStageProgress(elapsed, defenseStart, COMBAT_ROLL_DEFENSE_MS),
+      nowMs: args.nowMs,
+      resolvedLabelPrefix: 'block',
+    });
+  }
+
+  if (elapsed >= comparisonStart) {
+    drawComparisonRow(
+      args.ctx,
+      panelX + panelWidth - 252,
+      panelY + 74,
+      animation.roll.totalAttackHits,
+      animation.roll.totalBlockedHits,
+      animation.roll.effectiveHits,
+      Math.min(1, (elapsed - comparisonStart) / COMBAT_ROLL_COMPARISON_MS),
+    );
+  }
+
+  if (elapsed >= damageStart) {
+    drawDamageBadge(
+      args.ctx,
+      panelX + panelWidth - 252,
+      panelY + 138,
+      animation.roll.finalDamage,
+      Math.min(1, (elapsed - damageStart) / COMBAT_ROLL_DAMAGE_MS),
+    );
+  }
+
+  args.ctx.restore();
+}
+
 function drawMinimap(args: FrameRenderArgs, minimapCtx: CanvasRenderingContext2D): void {
   const { state, refs, showFullDungeonMap } = args;
   minimapCtx.clearRect(0, 0, refs.minimapCanvas.width, refs.minimapCanvas.height);
@@ -566,6 +671,162 @@ function drawMinimap(args: FrameRenderArgs, minimapCtx: CanvasRenderingContext2D
       coord.id === state.dungeon.currentRoomId ? '#fbbf24' : isCleared ? '#22c55e' : '#334155';
     minimapCtx.fillRect(px + 2, py + 2, cell - 4, cell - 4);
   });
+}
+
+function drawDiceRow(
+  ctx: CanvasRenderingContext2D,
+  args: {
+    x: number;
+    y: number;
+    label: string;
+    rolls: readonly number[];
+    resolvedValues: readonly number[];
+    color: string;
+    stageProgress: number;
+    nowMs: number;
+    resolvedLabelPrefix: string;
+  },
+): void {
+  const dieSize = 42;
+  const gap = 10;
+  const settleStart = 0.28;
+  const settleSpan = 0.72;
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText(args.label, args.x, args.y + dieSize / 2);
+
+  const diceStartX = args.x + 76;
+  const safeCount = Math.max(1, args.rolls.length);
+
+  for (let index = 0; index < args.rolls.length; index += 1) {
+    const dieX = diceStartX + index * (dieSize + gap);
+    const settleProgress = args.stageProgress <= settleStart
+      ? 0
+      : Math.min(1, (args.stageProgress - settleStart) / settleSpan);
+    const revealThreshold = (index + 1) / safeCount;
+    const isSettled = settleProgress >= revealThreshold;
+    const displayValue = isSettled
+      ? args.rolls[index]
+      : ((Math.floor(args.nowMs / 65) + index * 2) % 6) + 1;
+    const resolvedValue = args.resolvedValues[index] ?? 0;
+
+    ctx.fillStyle = isSettled ? 'rgba(15, 23, 42, 0.9)' : 'rgba(30, 41, 59, 0.88)';
+    ctx.fillRect(dieX, args.y, dieSize, dieSize);
+    ctx.strokeStyle = isSettled ? args.color : 'rgba(148, 163, 184, 0.45)';
+    ctx.lineWidth = isSettled ? 2 : 1.5;
+    ctx.strokeRect(dieX + 0.5, args.y + 0.5, dieSize - 1, dieSize - 1);
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(displayValue), dieX + dieSize / 2, args.y + dieSize / 2 + 1);
+
+    if (isSettled) {
+      ctx.fillStyle = resolvedValue > 0 ? '#fbbf24' : '#64748b';
+      ctx.font = '11px sans-serif';
+      ctx.fillText(`${args.resolvedLabelPrefix} ${resolvedValue}`, dieX + dieSize / 2, args.y + dieSize + 14);
+    }
+  }
+}
+
+function drawComparisonRow(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  attackHits: number,
+  blockedHits: number,
+  effectiveHits: number,
+  progress: number,
+): void {
+  const alpha = Math.max(0.2, progress);
+  const boxWidth = 68;
+  const gap = 10;
+  const entries = [
+    { label: 'hits', value: attackHits, color: '#fb923c' },
+    { label: 'blocks', value: blockedHits, color: '#38bdf8' },
+    { label: 'net', value: effectiveHits, color: '#a78bfa' },
+  ];
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  entries.forEach((entry, index) => {
+    const boxX = x + index * (boxWidth + gap);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.84)';
+    ctx.fillRect(boxX, y, boxWidth, 54);
+    ctx.strokeStyle = entry.color;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(boxX + 0.5, y + 0.5, boxWidth - 1, 53);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '11px sans-serif';
+    ctx.fillText(entry.label, boxX + boxWidth / 2, y + 14);
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 21px sans-serif';
+    ctx.fillText(String(entry.value), boxX + boxWidth / 2, y + 34);
+  });
+
+  ctx.restore();
+}
+
+function drawDamageBadge(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  damage: number,
+  progress: number,
+): void {
+  const alpha = Math.max(0.25, progress);
+  const scale = 0.9 + Math.min(1, progress) * 0.1;
+  const width = 224;
+  const height = 46;
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(centerX, centerY);
+  ctx.scale(scale, scale);
+  ctx.translate(-centerX, -centerY);
+  ctx.fillStyle = damage > 0 ? 'rgba(127, 29, 29, 0.92)' : 'rgba(30, 41, 59, 0.92)';
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeStyle = damage > 0 ? 'rgba(248, 113, 113, 0.8)' : 'rgba(148, 163, 184, 0.55)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+  ctx.fillStyle = '#f8fafc';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText(damage > 0 ? 'Damage' : 'No Damage', centerX, y + 14);
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText(String(damage), centerX, y + 31);
+  ctx.restore();
+}
+
+function getCombatRollStageLabel(
+  elapsed: number,
+  defenseStart: number,
+  comparisonStart: number,
+  damageStart: number,
+): string {
+  if (elapsed < defenseStart) return 'Attack dice';
+  if (elapsed < comparisonStart) return 'Defense dice';
+  if (elapsed < damageStart) return 'Compare hits';
+  return 'Final damage';
+}
+
+function getStageProgress(
+  elapsed: number,
+  stageStart: number,
+  stageDuration: number,
+): number {
+  if (elapsed <= stageStart) return 0;
+  if (elapsed >= stageStart + stageDuration) return 1;
+  return (elapsed - stageStart) / stageDuration;
 }
 
 function getSelectedHeroWeaponSummary(state: GameState): string {

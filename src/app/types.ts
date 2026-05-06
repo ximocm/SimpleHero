@@ -1,4 +1,4 @@
-import type { HeroClassName, HeroRaceName, HeroState } from '../data/dungeonTypes.js';
+import type { CombatRollSnapshot, HeroClassName, HeroRaceName, HeroState } from '../data/dungeonTypes.js';
 import type { InventoryEntry } from '../items/inventory.js';
 
 export type AppMode = 'menu' | 'character-creation' | 'game' | 'safe-zone' | 'run-complete';
@@ -24,6 +24,16 @@ export interface CampaignHero {
 export interface CampaignProfile {
   heroes: CampaignHero[];
   stash: InventoryEntry[];
+}
+
+export const COMBAT_ROLL_ANIMATION_TOTAL_MS = 3600;
+
+export interface CombatRollAnimationState {
+  roll: CombatRollSnapshot;
+  attackerLabel: string;
+  defenderLabel: string;
+  startedAt: number;
+  endsAt: number;
 }
 
 export type DragPayload =

@@ -42,6 +42,7 @@ export function performHeroAttack(state: GameState, hero: HeroState, enemy: Enem
     weapon.attackDice,
     weapon.damage + damageBonus,
     getEnemyDefenseDiceBonus(enemy),
+    { baseDefenseDice: 0 },
   );
 
   enemy.hp = Math.max(0, enemy.hp - roll.finalDamage);
@@ -168,14 +169,17 @@ function resolveAttack(
   attackDice: number,
   weaponDamage: number,
   defenseDiceBonus: number,
+  options?: {
+    baseDefenseDice?: number;
+  },
 ): CombatRollSnapshot {
   const attackRolls = Array.from({ length: attackDice }, () => rollD6(state));
   const attackHits = attackRolls.map(convertDieToHits);
   const totalAttackHits = attackHits.reduce((sum, value) => sum + value, 0);
 
-  const defenseDiceTotal = Math.max(1, 1 + defenseDiceBonus);
+  const defenseDiceTotal = Math.max(0, (options?.baseDefenseDice ?? 1) + defenseDiceBonus);
   const defenseRolls = Array.from({ length: defenseDiceTotal }, () => rollD6(state));
-  const blockedHits = defenseRolls.map(convertDieToHits);
+  const blockedHits = defenseRolls.map(convertDefenseDieToBlocks);
   const totalBlockedHits = blockedHits.reduce((sum, value) => sum + value, 0);
   const effectiveHits = Math.max(0, totalAttackHits - totalBlockedHits);
   const hero = state.party.heroes.find((candidate) => candidate.id === attackerId);
@@ -200,6 +204,10 @@ function convertDieToHits(roll: number): number {
   if (roll >= 6) return 2;
   if (roll >= 4) return 1;
   return 0;
+}
+
+function convertDefenseDieToBlocks(roll: number): number {
+  return roll >= 4 ? 1 : 0;
 }
 
 function rollD6(state: GameState): number {

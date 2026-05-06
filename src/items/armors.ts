@@ -16,14 +16,14 @@ export const ARMOR_DEFINITIONS: Record<ArmorId, ArmorDefinition> = {
     name: 'Light Armor',
     file: 'assets/images/items/light-armor.png',
     defenseDiceBonus: 1,
-    movementModifier: 0,
+    movementModifier: 1,
   },
   'heavy-armor': {
     id: 'heavy-armor',
     name: 'Heavy Armor',
     file: 'assets/images/items/heavy-armor.png',
     defenseDiceBonus: 2,
-    movementModifier: -1,
+    movementModifier: 0,
   },
   shield: {
     id: 'shield',

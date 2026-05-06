@@ -1,5 +1,5 @@
 import type { Coord, HeroState, PartyState } from '../data/dungeonTypes.js';
-import { createDefaultHeroes } from '../heroes/heroSystem.js';
+import { createDefaultHeroes, createHeroesFromRoster, type HeroRosterEntry } from '../heroes/heroSystem.js';
 
 /**
  * Builds the party and places heroes on provided starting tiles.
@@ -7,8 +7,13 @@ import { createDefaultHeroes } from '../heroes/heroSystem.js';
  * @param startTiles Ordered starting tiles for heroes.
  * @returns Initialized party state.
  */
-export function createParty(roomId: string, startTiles: readonly Coord[]): PartyState {
-  const heroes: HeroState[] = createDefaultHeroes(roomId, startTiles);
+export function createParty(
+  roomId: string,
+  startTiles: readonly Coord[],
+  roster?: readonly HeroRosterEntry[],
+): PartyState {
+  const heroes: HeroState[] =
+    roster && roster.length > 0 ? createHeroesFromRoster(roomId, startTiles, roster) : createDefaultHeroes(roomId, startTiles);
 
   return {
     heroes,

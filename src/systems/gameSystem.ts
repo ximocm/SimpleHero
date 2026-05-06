@@ -24,6 +24,7 @@ import { inBounds } from '../utils/grid.js';
 import { findPathAStar } from '../utils/pathfinding.js';
 import { createDungeonState, getRoomAt } from './dungeonStateSystem.js';
 import { createParty, getActiveHero, setActiveHero } from './partySystem.js';
+import type { HeroRosterEntry } from '../heroes/heroSystem.js';
 import {
   getHeroAvailableSpellIds,
   performFireballSpell,
@@ -32,6 +33,8 @@ import {
   performIceSpell,
 } from './combatSystem.js';
 import { CONSUMABLE_DEFINITIONS } from '../items/consumables.js';
+import { TREASURE_DEFINITIONS } from '../items/treasures.js';
+import { CLASS_DEFINITIONS } from '../heroes/classes.js';
 import { SPELL_DEFINITIONS } from '../magic/spells.js';
 import { canHeroCastSpells, getHeroAttackRange } from './weaponSystem.js';
 import {
@@ -48,6 +51,8 @@ export interface GameState {
   dungeon: DungeonState;
   party: PartyState;
   runState: RunState;
+  runGold: number;
+  accountGoldApplied: boolean;
   hoverPath: Coord[];
   spellPreviewTiles: Coord[];
   movingPath: Coord[];
@@ -65,6 +70,7 @@ export interface GameState {
 
 export interface HeroPanelView {
   id: string;
+  name: string;
   classLetter: 'W' | 'R' | 'M';
   className: string;
   raceName: string;
@@ -85,6 +91,8 @@ export interface HeroPanelView {
   movementRemaining: number | null;
   actionPointsRemaining: number | null;
   attackSlotAvailable: boolean | null;
+  skillCooldownRemaining: number;
+  powerStrikeArmed: boolean;
 }
 
 export interface RoomEncounterView {
@@ -114,12 +122,19 @@ export interface CastActionView {
   spellIds: SpellId[];
 }
 
+export interface SkillActionView {
+  label: string;
+  isAvailable: boolean;
+  cooldownRemaining: number;
+}
+
 export interface RunSummaryView {
   result: RunState;
   seed: number;
   discoveredRooms: number;
   floorsReached: number;
   survivingHeroes: number;
+  runGold: number;
 }
 
 /**
@@ -127,7 +142,7 @@ export interface RunSummaryView {
  * @param seed Run seed.
  * @returns Initialized game state.
  */
-export function createGameState(seed: number): GameState {
+export function createGameState(seed: number, roster?: readonly HeroRosterEntry[]): GameState {
   const dungeon = createDungeonState(seed);
   const room = dungeon.rooms.get(dungeon.currentRoomId);
   if (!room) {
@@ -136,11 +151,13 @@ export function createGameState(seed: number): GameState {
 
   const center = { x: Math.floor(room.width / 2), y: Math.floor(room.height / 2) };
   const initialStartTiles = getClosestWalkableTiles(room, center, 3);
-  const party = createParty(room.id, initialStartTiles);
+  const party = createParty(room.id, initialStartTiles, roster);
   const state: GameState = {
     dungeon,
     party,
     runState: 'active',
+    runGold: 0,
+    accountGoldApplied: false,
     hoverPath: [],
     spellPreviewTiles: [],
     movingPath: [],
@@ -156,6 +173,7 @@ export function createGameState(seed: number): GameState {
     lastCombatRoll: null,
   };
   syncCombatTurnState(state);
+  maybeCollectTreasureReward(state, room);
   return state;
 }
 
@@ -393,6 +411,7 @@ function maybeTransitionRoom(state: GameState): void {
   state.hoverPath = [];
   state.movingPath = [];
   syncCombatTurnState(state);
+  maybeCollectTreasureReward(state, nextRoom);
   if (nextRoom.roomType === 'exit' && state.party.heroes.some((hero) => hero.hp > 0)) {
     if (areAllRequiredRoomsCleared(state.dungeon)) {
       setRunState(state, 'won');
@@ -403,6 +422,16 @@ function maybeTransitionRoom(state: GameState): void {
       state.recentCombatLog = state.recentCombatLog.slice(0, 6);
     }
   }
+}
+
+function maybeCollectTreasureReward(state: GameState, room: RoomData): void {
+  if (room.roomType !== 'treasure' || !room.treasure || room.treasure.isCollected) return;
+
+  room.treasure.isCollected = true;
+  const reward = TREASURE_DEFINITIONS[room.treasure.rewardId];
+  state.runGold += reward.goldValue;
+  state.recentCombatLog.unshift(`Treasure found: ${reward.name} worth ${reward.goldValue} gold`);
+  state.recentCombatLog = state.recentCombatLog.slice(0, 6);
 }
 
 /**
@@ -550,6 +579,7 @@ export function getHeroPanelViews(state: GameState): HeroPanelView[] {
 
     return {
       id: hero.id,
+      name: hero.name,
       classLetter: hero.classLetter,
       className: hero.className,
       raceName: hero.raceName,
@@ -570,6 +600,8 @@ export function getHeroPanelViews(state: GameState): HeroPanelView[] {
       movementRemaining: turnResources?.movementRemaining ?? null,
       actionPointsRemaining: turnResources?.actionPointsRemaining ?? null,
       attackSlotAvailable: turnResources?.attackSlotAvailable ?? null,
+      skillCooldownRemaining: hero.skillState.cooldownRemaining,
+      powerStrikeArmed: hero.skillState.powerStrikeArmed,
     };
   });
 }
@@ -642,12 +674,14 @@ export function tryHeroAttackAtTile(state: GameState, target: Coord): boolean {
   if (!enemy) return false;
   if (!canHeroBasicAttackEnemy(state, hero.id, enemy.id)) return false;
 
+  updateFacing(hero.tile, enemy.tile, hero);
   const result = performHeroAttack(state, hero, enemy);
   const resources = state.turn?.heroResourcesById[hero.id];
   if (resources) resources.attackSlotAvailable = false;
   state.lastCombatRoll = result.roll;
   state.recentCombatLog.unshift(formatCombatLogEntry(hero.className, enemy.kind, result.roll, result.defenderDefeated));
   state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  hero.skillState.powerStrikeArmed = false;
   state.attackModeHeroId = null;
   state.castModeHeroId = null;
   state.selectedSpellId = null;
@@ -715,6 +749,65 @@ export function getActiveHeroConsumableActionView(state: GameState): ConsumableA
     label: consumable ? `use ${consumable.name}` : 'use item',
     isAvailable: canUseActiveHeroConsumable(state),
   };
+}
+
+export function getActiveHeroSkillActionView(state: GameState): SkillActionView {
+  const hero = getActiveHero(state.party);
+  const classDef = CLASS_DEFINITIONS[hero.className];
+  const resources = getCurrentHeroTurnResources(state);
+
+  if (hero.className === 'Mage') {
+    return {
+      label: classDef.skillName,
+      isAvailable: false,
+      cooldownRemaining: 0,
+    };
+  }
+
+  return {
+    label:
+      hero.className === 'Warrior' && hero.skillState.powerStrikeArmed
+        ? `${classDef.skillName} ready`
+        : classDef.skillName,
+    isAvailable:
+      state.turn?.phase === 'heroes' &&
+      canHeroActNow(state, hero.id) &&
+      (resources?.actionPointsRemaining ?? 0) > 0 &&
+      hero.skillState.cooldownRemaining === 0,
+    cooldownRemaining: hero.skillState.cooldownRemaining,
+  };
+}
+
+export function useActiveHeroSkill(state: GameState): boolean {
+  if (state.runState !== 'active') return false;
+  const hero = getActiveHero(state.party);
+  const skillAction = getActiveHeroSkillActionView(state);
+  if (!skillAction.isAvailable) return false;
+
+  const resources = state.turn?.heroResourcesById[hero.id];
+  if (state.turn && !resources) return false;
+
+  if (hero.className === 'Warrior') {
+    consumeHeroActionPoint(state, hero.id);
+    hero.skillState.cooldownRemaining = CLASS_DEFINITIONS.Warrior.skillCooldownTurns;
+    hero.skillState.powerStrikeArmed = true;
+    state.recentCombatLog.unshift('Warrior used Power Strike: next basic attack gains +3 damage this turn');
+    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+    return true;
+  }
+
+  if (hero.className === 'Ranger') {
+    consumeHeroActionPoint(state, hero.id);
+    hero.skillState.cooldownRemaining = CLASS_DEFINITIONS.Ranger.skillCooldownTurns;
+    if (resources) {
+      resources.movementRemaining += 2;
+    }
+    state.recentCombatLog.unshift('Ranger used Dash: +2 movement this turn');
+    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+    return true;
+  }
+
+  return false;
 }
 
 export function getActiveHeroCastActionView(state: GameState): CastActionView {
@@ -943,7 +1036,7 @@ export function isRoomObjectiveCleared(room: RoomData): boolean {
     return room.encounter !== null && room.encounter.isCleared;
   }
   if (room.roomType === 'treasure') {
-    return room.progress.hasBeenEntered && room.progress.hasBeenExited;
+    return room.treasure?.isCollected ?? false;
   }
   return true;
 }
@@ -978,6 +1071,14 @@ export function setRunState(state: GameState, next: RunState): void {
   ensureActiveHeroIsLiving(state);
 }
 
+export function retreatRun(state: GameState): boolean {
+  if (state.runState !== 'active') return false;
+  setRunState(state, 'lost');
+  state.recentCombatLog.unshift('Run failed: the party retreated from the dungeon.');
+  state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  return true;
+}
+
 export function ensureActiveHeroIsLiving(state: GameState): void {
   const current = state.party.heroes[state.party.activeHeroIndex];
   if (current && current.hp > 0) return;
@@ -1000,6 +1101,7 @@ export function getRunSummaryView(state: GameState): RunSummaryView {
     discoveredRooms: state.dungeon.discoveredRoomIds.size,
     floorsReached: highestFloorReached,
     survivingHeroes: state.party.heroes.filter((hero) => hero.hp > 0).length,
+    runGold: state.runGold,
   };
 }
 

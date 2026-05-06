@@ -12,17 +12,28 @@ import type {
   RoomProgressState,
   RoomType,
   RunState,
+  TreasureState,
 } from '../data/dungeonTypes.js';
+import type { CampaignHero, CampaignProfile } from '../app/types.js';
 import type { InventoryEntry } from '../items/inventory.js';
 import { ITEM_DEFINITIONS } from '../items/items.js';
 import { createGameState, type GameState } from './gameSystem.js';
 import { syncCombatTurnState } from './turnSystem.js';
 import { inBounds } from '../utils/grid.js';
 import { isWalkable, TileType } from '../data/tileTypes.js';
+import { createCampaignRoster, DEFAULT_PARTY_BLUEPRINTS } from '../heroes/heroSystem.js';
 
 const SAVE_KEY = 'simplehero.autosave.v1';
 const INVENTORY_SAVE_KEY = 'simplehero.inventory.v1';
+const ACCOUNT_GOLD_SAVE_KEY = 'simplehero.account-gold.v1';
+const PROFILE_SAVE_KEY = 'simplehero.profile.v1';
 const HERO_COUNT = 3;
+
+interface PersistedCampaignProfileV1 {
+  version: 1;
+  heroes: CampaignHero[];
+  stash: InventoryEntry[];
+}
 
 interface PersistedDungeonState {
   seed: number;
@@ -115,6 +126,23 @@ interface PersistedGameStateV7 {
   runState: RunState;
 }
 
+interface PersistedGameStateV8 {
+  version: 8;
+  savedAt: number;
+  dungeon: PersistedDungeonState;
+  party: PersistedPartyStateV2;
+  turn: CombatTurnState | null;
+  combatRngState: number;
+  attackModeHeroId: string | null;
+  castModeHeroId: string | null;
+  selectedSpellId: 'heal' | 'fireball' | 'ice' | null;
+  recentCombatLog: string[];
+  lastCombatRoll: CombatRollSnapshot | null;
+  runState: RunState;
+  runGold: number;
+  accountGoldApplied: boolean;
+}
+
 type PersistedSnapshot =
   | PersistedGameStateV1
   | PersistedGameStateV2
@@ -122,7 +150,8 @@ type PersistedSnapshot =
   | PersistedGameStateV4
   | PersistedGameStateV5
   | PersistedGameStateV6
-  | PersistedGameStateV7;
+  | PersistedGameStateV7
+  | PersistedGameStateV8;
 
 /**
  * Loads and restores game state from localStorage, if available and valid.
@@ -134,7 +163,7 @@ export function loadPersistedGameState(): GameState | null {
 
   try {
     const data = JSON.parse(raw) as PersistedSnapshot;
-    if (data.version !== 1 && data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5 && data.version !== 6 && data.version !== 7) return null;
+    if (data.version !== 1 && data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5 && data.version !== 6 && data.version !== 7 && data.version !== 8) return null;
     return restoreFromSnapshot(data);
   } catch {
     return null;
@@ -155,8 +184,8 @@ export function hasPersistedGameState(): boolean {
  * @returns Nothing.
  */
 export function persistGameState(state: GameState): void {
-  const snapshot: PersistedGameStateV7 = {
-    version: 7,
+  const snapshot: PersistedGameStateV8 = {
+    version: 8,
     savedAt: Date.now(),
     dungeon: {
       seed: state.dungeon.seed,
@@ -176,7 +205,15 @@ export function persistGameState(state: GameState): void {
     },
     party: {
       activeHeroIndex: state.party.activeHeroIndex,
-      heroes: state.party.heroes.map((hero) => ({ ...hero, tile: { ...hero.tile } })),
+      heroes: state.party.heroes.map((hero) => ({
+        ...hero,
+        tile: { ...hero.tile },
+        equipment: {
+          ...hero.equipment,
+          backpack: [...hero.equipment.backpack],
+        },
+        skillState: { ...hero.skillState },
+      })),
     },
     turn: state.turn
       ? {
@@ -205,6 +242,8 @@ export function persistGameState(state: GameState): void {
         }
       : null,
     runState: state.runState,
+    runGold: state.runGold,
+    accountGoldApplied: state.accountGoldApplied,
   };
 
   localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
@@ -250,6 +289,53 @@ export function persistPartyInventory(inventory: readonly InventoryEntry[]): voi
  */
 export function clearPersistedPartyInventory(): void {
   localStorage.removeItem(INVENTORY_SAVE_KEY);
+}
+
+export function loadPersistedAccountGold(): number {
+  const raw = localStorage.getItem(ACCOUNT_GOLD_SAVE_KEY);
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed | 0 : 0;
+}
+
+export function persistAccountGold(accountGold: number): void {
+  localStorage.setItem(ACCOUNT_GOLD_SAVE_KEY, String(Math.max(0, accountGold | 0)));
+}
+
+export function clearPersistedAccountGold(): void {
+  localStorage.removeItem(ACCOUNT_GOLD_SAVE_KEY);
+}
+
+export function loadPersistedCampaignProfile(): CampaignProfile | null {
+  const raw = localStorage.getItem(PROFILE_SAVE_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as PersistedCampaignProfileV1;
+    if (parsed.version !== 1) return null;
+    return sanitizeCampaignProfile(parsed);
+  } catch {
+    return null;
+  }
+}
+
+export function persistCampaignProfile(profile: CampaignProfile): void {
+  const snapshot: PersistedCampaignProfileV1 = {
+    version: 1,
+    heroes: profile.heroes.map((hero) => ({
+      ...hero,
+      equipment: {
+        ...hero.equipment,
+        backpack: [...hero.equipment.backpack],
+      },
+    })),
+    stash: profile.stash.map((entry) => ({ ...entry })),
+  };
+  localStorage.setItem(PROFILE_SAVE_KEY, JSON.stringify(snapshot));
+}
+
+export function clearPersistedCampaignProfile(): void {
+  localStorage.removeItem(PROFILE_SAVE_KEY);
 }
 
 function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
@@ -307,6 +393,7 @@ function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
     return {
       ...base,
       id: typeof hero.id === 'string' && hero.id.length > 0 ? hero.id : base.id,
+      name: typeof maybeHero.name === 'string' && maybeHero.name.trim().length > 0 ? maybeHero.name.trim().slice(0, 24) : base.name,
       classLetter: sanitizeClassLetter(hero.classLetter, base.classLetter),
       className: sanitizeClassName(maybeHero, base.className),
       raceName: sanitizeRaceName(maybeHero, base.raceName),
@@ -315,6 +402,7 @@ function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
       body: Math.max(0, toInt(maybeHero.body, base.body)),
       mind: Math.max(0, toInt(maybeHero.mind, base.mind)),
       equipment: sanitizeEquipment(maybeHero.equipment, base.equipment),
+      skillState: sanitizeHeroSkillState(maybeHero.skillState, base.skillState),
       roomId: safeRoomId,
       tile: safeTile,
       facing: sanitizeFacing(hero.facing, base.facing),
@@ -360,6 +448,8 @@ function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
       : [];
   state.lastCombatRoll = 'lastCombatRoll' in snapshot ? sanitizeCombatRoll(snapshot.lastCombatRoll) : null;
   state.runState = sanitizeRunState('runState' in snapshot ? snapshot.runState : 'active');
+  state.runGold = 'runGold' in snapshot ? Math.max(0, toInt(snapshot.runGold, 0)) : 0;
+  state.accountGoldApplied = 'accountGoldApplied' in snapshot ? Boolean(snapshot.accountGoldApplied) : false;
   syncCombatTurnState(state);
 
   return state;
@@ -400,12 +490,14 @@ function sanitizeRoomData(room: RoomData, fallback: RoomData | undefined): RoomD
   const fallbackType = fallback?.roomType ?? 'combat';
   const roomType = sanitizeRoomType(room.roomType, fallbackType);
   const encounter = sanitizeEncounter(room.encounter, roomType, fallback?.encounter ?? null);
+  const treasure = sanitizeTreasure(room.treasure, roomType, fallback?.treasure ?? null);
   const progress = sanitizeRoomProgress(room.progress, fallback?.progress);
 
   return {
     ...room,
     roomType,
     encounter,
+    treasure,
     progress,
   };
 }
@@ -446,6 +538,23 @@ function sanitizeEncounter(
   return {
     enemyIds: [...enemyIds],
     isCleared,
+  };
+}
+
+function sanitizeTreasure(
+  value: unknown,
+  roomType: RoomType,
+  fallback: TreasureState | null,
+): TreasureState | null {
+  if (roomType !== 'treasure') return null;
+  if (!value || typeof value !== 'object') {
+    return fallback ? { ...fallback } : { rewardId: 'gold', isCollected: false };
+  }
+
+  const treasure = value as Partial<TreasureState>;
+  return {
+    rewardId: treasure.rewardId === 'ruby' ? 'ruby' : treasure.rewardId === 'gold' ? 'gold' : fallback?.rewardId ?? 'gold',
+    isCollected: typeof treasure.isCollected === 'boolean' ? treasure.isCollected : fallback?.isCollected ?? false,
   };
 }
 
@@ -667,6 +776,24 @@ function sanitizeFacing(value: unknown, fallback: Direction): Direction {
   return fallback;
 }
 
+function sanitizeHeroSkillState(
+  value: unknown,
+  fallback: HeroState['skillState'],
+): HeroState['skillState'] {
+  if (!value || typeof value !== 'object') {
+    return { ...fallback };
+  }
+
+  const skillState = value as Partial<HeroState['skillState']>;
+  return {
+    cooldownRemaining: Math.max(0, toInt(skillState.cooldownRemaining, fallback.cooldownRemaining)),
+    powerStrikeArmed:
+      typeof skillState.powerStrikeArmed === 'boolean'
+        ? skillState.powerStrikeArmed
+        : fallback.powerStrikeArmed,
+  };
+}
+
 function toInt(value: unknown, fallback: number): number {
   return Number.isFinite(value) ? (value as number) | 0 : fallback;
 }
@@ -716,4 +843,32 @@ function sanitizeInventory(value: unknown[]): InventoryEntry[] {
   }
 
   return sanitized;
+}
+
+function sanitizeCampaignProfile(value: PersistedCampaignProfileV1): CampaignProfile {
+  const defaultRoster = createCampaignRoster(DEFAULT_PARTY_BLUEPRINTS);
+  const heroes = Array.isArray(value.heroes) ? value.heroes.slice(0, HERO_COUNT) : [];
+  const sanitizedHeroes: CampaignHero[] = heroes.map((hero, index) => {
+    const fallback = defaultRoster[index];
+    return {
+      id: typeof hero?.id === 'string' && hero.id.length > 0 ? hero.id : fallback.id,
+      name: typeof hero?.name === 'string' && hero.name.trim().length > 0 ? hero.name.trim().slice(0, 24) : fallback.name,
+      className: hero?.className === 'Warrior' || hero?.className === 'Ranger' || hero?.className === 'Mage' ? hero.className : fallback.className,
+      raceName: hero?.raceName === 'Human' || hero?.raceName === 'Elf' || hero?.raceName === 'Orc' ? hero.raceName : fallback.raceName,
+      equipment: sanitizeEquipment(hero?.equipment, fallback.equipment),
+    };
+  });
+
+  while (sanitizedHeroes.length < HERO_COUNT) {
+    const fallback = defaultRoster[sanitizedHeroes.length];
+    sanitizedHeroes.push({
+      ...fallback,
+      equipment: sanitizeEquipment(fallback.equipment, fallback.equipment),
+    });
+  }
+
+  return {
+    heroes: sanitizedHeroes,
+    stash: sanitizeInventory(Array.isArray(value.stash) ? value.stash : []),
+  };
 }

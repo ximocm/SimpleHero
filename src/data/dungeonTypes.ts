@@ -5,6 +5,7 @@ export type HeroClassName = 'Warrior' | 'Ranger' | 'Mage';
 export type HeroRaceName = 'Human' | 'Elf' | 'Orc';
 export type RoomType = 'combat' | 'treasure' | 'exit';
 export type EnemyKind = 'skeleton-sword' | 'skeleton-archer';
+export type TreasureId = 'gold' | 'ruby';
 export type TurnUnitKind = 'hero' | 'enemy';
 export type CombatPhase = 'heroes' | 'enemies';
 export type RunState = 'active' | 'won' | 'lost';
@@ -29,6 +30,7 @@ export interface RoomData {
   exits: Partial<Record<Direction, Coord>>;
   roomType: RoomType;
   encounter: RoomEncounterState | null;
+  treasure: TreasureState | null;
   progress: RoomProgressState;
 }
 
@@ -40,6 +42,11 @@ export interface RoomEncounterState {
 export interface RoomProgressState {
   hasBeenEntered: boolean;
   hasBeenExited: boolean;
+}
+
+export interface TreasureState {
+  rewardId: TreasureId;
+  isCollected: boolean;
 }
 
 export interface EnemyTurnStatusEffects {
@@ -96,6 +103,7 @@ export interface CombatRollSnapshot {
 
 export interface HeroState {
   id: string;
+  name: string;
   classLetter: 'W' | 'R' | 'M';
   className: HeroClassName;
   raceName: HeroRaceName;
@@ -110,9 +118,15 @@ export interface HeroState {
     relic: string | null;
     backpack: string[];
   };
+  skillState: HeroSkillState;
   roomId: string;
   tile: Coord;
   facing: Direction;
+}
+
+export interface HeroSkillState {
+  cooldownRemaining: number;
+  powerStrikeArmed: boolean;
 }
 
 export interface PartyState {

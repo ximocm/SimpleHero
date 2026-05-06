@@ -3,6 +3,7 @@ import { TileType } from '../data/tileTypes.js';
 import { chooseRoomTemplate } from '../rooms/roomSelector.js';
 import type { RoomTemplate } from '../rooms/roomTemplates.js';
 import { roomIdFromCoord } from '../utils/coord.js';
+import { createRng, seedFromRoom } from '../utils/seed.js';
 
 const EXIT_BY_MARKER: Record<string, Direction> = {
   N: 'N',
@@ -31,6 +32,7 @@ export function createRoom(runSeed: number, coord: RoomCoord, roomType: RoomType
     exits: parsed.exits,
     roomType,
     encounter: roomType === 'combat' ? { enemyIds: [], isCleared: true } : null,
+    treasure: roomType === 'treasure' ? createTreasureState(runSeed, id) : null,
     progress: {
       hasBeenEntered: false,
       hasBeenExited: false,
@@ -121,4 +123,12 @@ function stampDefaultExits(
     exits.E = { x: width - 1, y: centerY };
     tiles[centerY][width - 1] = TileType.EXIT;
   }
+}
+
+function createTreasureState(runSeed: number, roomId: string): RoomData['treasure'] {
+  const rng = createRng(seedFromRoom(runSeed, `${roomId}:treasure`));
+  return {
+    rewardId: rng() < 0.35 ? 'ruby' : 'gold',
+    isCollected: false,
+  };
 }

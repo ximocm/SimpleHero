@@ -28,12 +28,13 @@ export interface SpellCastResult {
  */
 export function performHeroAttack(state: GameState, hero: HeroState, enemy: EnemyState): AttackResult {
   const weapon = getHeroAttackProfile(hero);
+  const damageBonus = hero.className === 'Warrior' && hero.skillState.powerStrikeArmed ? 3 : 0;
   const roll = resolveAttack(
     state,
     hero.id,
     enemy.id,
     weapon.attackDice,
-    weapon.damage,
+    weapon.damage + damageBonus,
     getEnemyDefenseDiceBonus(enemy),
   );
 

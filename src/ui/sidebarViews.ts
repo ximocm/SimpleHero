@@ -26,6 +26,12 @@ export function renderCharacterPanelsHtml(args: {
                 hero.attackSlotAvailable ? 'Ready' : 'Spent'
               }`
             : 'Move - · AP - · Attack -';
+      const skillStatus =
+        hero.className === 'Warrior' && hero.powerStrikeArmed
+          ? 'Skill: Power Strike armed'
+          : hero.skillCooldownRemaining > 0
+            ? `Skill CD ${hero.skillCooldownRemaining}`
+            : 'Skill ready';
 
       return `
         <div
@@ -33,16 +39,17 @@ export function renderCharacterPanelsHtml(args: {
           style="cursor:${hero.isDefeated ? 'default' : 'pointer'}; border:1px solid ${border}; min-height:118px; padding:12px; background:${hero.isDefeated ? 'rgba(69,10,10,0.45)' : 'rgba(15,23,42,0.55)'};"
         >
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <div style="font-size:15px; font-weight:600;">${hero.classLetter} · ${hero.className}</div>
+            <div style="font-size:15px; font-weight:600;">${hero.name}</div>
             <div style="font-size:12px; color:${badgeColor};">${badgeLabel}</div>
           </div>
-          <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">${hero.raceName}</div>
+          <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">${hero.classLetter} · ${hero.className} · ${hero.raceName}</div>
           <div style="font-size:12px; margin-bottom:4px;">HP ${hero.hp}/${hero.maxHp}</div>
           <div style="height:8px; background:rgba(148,163,184,0.25); margin-bottom:8px;">
             <div style="width:${hpPercent}%; height:100%; background:#22c55e;"></div>
           </div>
           <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;">Body ${hero.body} · Mind ${hero.mind}</div>
           <div style="font-size:11px; color:#93c5fd; margin-bottom:8px;">${turnEconomy}</div>
+          <div style="font-size:11px; color:#fbbf24; margin-bottom:8px;">${skillStatus}</div>
           <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
             ${renderEquipSlot(index, 'armor', 'A', hero.armor, itemById, getItemTooltip)}
             ${renderEquipSlot(index, 'leftHand', 'L', hero.leftHand, itemById, getItemTooltip)}

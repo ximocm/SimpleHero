@@ -23,7 +23,7 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     handsRequired: 1,
     range: 1,
     attackDice: 2,
-    damage: 3,
+    damage: 2,
   },
   'two-handed-sword': {
     id: 'two-handed-sword',
@@ -31,7 +31,7 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     file: 'assets/images/items/two_hand_sword.png',
     handsRequired: 2,
     range: 1,
-    attackDice: 4,
+    attackDice: 1,
     damage: 4,
   },
   bow: {
@@ -39,8 +39,8 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     name: 'Bow',
     file: 'assets/images/items/bow.png',
     handsRequired: 2,
-    range: 5,
-    attackDice: 3,
+    range: 4,
+    attackDice: 2,
     damage: 2,
   },
   staff: {
@@ -50,7 +50,7 @@ export const WEAPON_DEFINITIONS: Record<WeaponId, WeaponDefinition> = {
     handsRequired: 1,
     castingFocus: true,
     range: 4,
-    attackDice: 3,
-    damage: 2,
+    attackDice: 1,
+    damage: 3,
   },
 };

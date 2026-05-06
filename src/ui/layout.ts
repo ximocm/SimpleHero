@@ -27,18 +27,18 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
               menu
             </button>
             <button
-              id="resetStateButton"
-              type="button"
-              style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(248,113,113,0.5); background:rgba(127,29,29,0.55); color:#fee2e2; cursor:pointer;"
-            >
-              reboot
-            </button>
-            <button
               id="attackButton"
               type="button"
               style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(251,191,36,0.45); background:rgba(120,53,15,0.45); color:#fef3c7; cursor:pointer;"
             >
               basic attack
+            </button>
+            <button
+              id="skillButton"
+              type="button"
+              style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(251,146,60,0.45); background:rgba(154,52,18,0.4); color:#ffedd5; cursor:pointer;"
+            >
+              class skill
             </button>
             <button
               id="castButton"
@@ -54,13 +54,6 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
               style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(74,222,128,0.45); background:rgba(20,83,45,0.45); color:#dcfce7; cursor:pointer;"
             >
               use item
-            </button>
-            <button
-              id="endTurnButton"
-              type="button"
-              style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(96,165,250,0.45); background:rgba(30,64,175,0.45); color:#dbeafe; cursor:pointer;"
-            >
-              end heroes turn
             </button>
             <div id="goldValue" style="margin-bottom:12px;">gold: 0</div>
             <div style="font-size:14px; color:#94a3b8; margin-bottom:10px;">party inventory</div>

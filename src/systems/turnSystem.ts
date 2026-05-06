@@ -301,6 +301,14 @@ function beginEnemyPhase(state: GameState): void {
   const turn = state.turn;
   if (!turn) return;
 
+  for (const hero of state.party.heroes) {
+    if (hero.roomId !== turn.roomId || hero.hp <= 0) continue;
+    if (hero.skillState.cooldownRemaining > 0) {
+      hero.skillState.cooldownRemaining -= 1;
+    }
+    hero.skillState.powerStrikeArmed = false;
+  }
+
   turn.phase = 'enemies';
   turn.enemyQueue = (state.dungeon.enemiesByRoomId.get(turn.roomId) ?? [])
     .filter((enemy) => enemy.hp > 0)

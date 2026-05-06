@@ -110,6 +110,7 @@ export class AppController {
       castButton: requireElement<HTMLButtonElement>('#castButton'),
       castMenu: requireElement<HTMLDivElement>('#castMenu'),
       useItemButton: requireElement<HTMLButtonElement>('#useItemButton'),
+      skipTurnButton: requireElement<HTMLButtonElement>('#skipTurnButton'),
     };
     this.ctx = requireContext(this.refs.canvas);
     this.minimapCtx = requireContext(this.refs.minimapCanvas);
@@ -437,6 +438,13 @@ export class AppController {
       if (!this.isGameplayMode()) return;
       const toggled = toggleItemUseMode(this.state);
       if (!toggled && !this.state.itemUseModeHeroId) return;
+      this.persistAll();
+      this.renderAll();
+    });
+
+    this.refs.skipTurnButton.addEventListener('click', () => {
+      if (!this.isGameplayMode()) return;
+      passTurn(this.state);
       this.persistAll();
       this.renderAll();
     });

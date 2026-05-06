@@ -74,6 +74,7 @@ export class AppController {
   private safeZoneHeroIndex = 0;
   private appMode: AppMode;
   private overlayMode: OverlayMode = null;
+  private inventoryModalOpen = false;
   private diceAnimation: CombatRollAnimationState | null = null;
   private lastObservedCombatRoll: GameState['lastCombatRoll'] = null;
   private lastMoveStepAt = 0;
@@ -81,6 +82,7 @@ export class AppController {
   private readonly refs: AppRenderRefs;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly minimapCtx: CanvasRenderingContext2D;
+  private readonly resultCtx: CanvasRenderingContext2D;
 
   constructor() {
     const navigationEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
@@ -100,14 +102,19 @@ export class AppController {
     this.refs = {
       canvas: requireElement<HTMLCanvasElement>('#gameCanvas'),
       minimapCanvas: requireElement<HTMLCanvasElement>('#minimapCanvas'),
+      resultCanvas: requireElement<HTMLCanvasElement>('#resultCanvas'),
       gameRoot: requireElement<HTMLDivElement>('#gameRoot'),
       screenOverlay: requireElement<HTMLDivElement>('#screenOverlay'),
+      inventoryModal: requireElement<HTMLDivElement>('#inventoryModal'),
+      inventoryModalGold: requireElement<HTMLDivElement>('#inventoryModalGold'),
+      inventoryModalList: requireElement<HTMLDivElement>('#inventoryModalList'),
       status: requireElement<HTMLDivElement>('#status'),
       controlsHint: requireElement<HTMLDivElement>('#controlsHint'),
       characterPanels: requireElement<HTMLDivElement>('#characterPanels'),
       goldValue: requireElement<HTMLDivElement>('#goldValue'),
       combatLog: requireElement<HTMLDivElement>('#combatLog'),
       partyInventoryList: requireElement<HTMLDivElement>('#partyInventoryList'),
+      inventoryButton: requireElement<HTMLButtonElement>('#inventoryButton'),
       attackButton: requireElement<HTMLButtonElement>('#attackButton'),
       skillButton: requireElement<HTMLButtonElement>('#skillButton'),
       castButton: requireElement<HTMLButtonElement>('#castButton'),
@@ -117,6 +124,7 @@ export class AppController {
     };
     this.ctx = requireContext(this.refs.canvas);
     this.minimapCtx = requireContext(this.refs.minimapCanvas);
+    this.resultCtx = requireContext(this.refs.resultCanvas);
     this.inventoryController = new InventoryController(() => this.state, () => this.partyInventory);
   }
 
@@ -155,15 +163,23 @@ export class AppController {
       this.state,
       this.partyInventory,
       this.accountGold,
-      { goldValue: this.refs.goldValue, partyInventoryList: this.refs.partyInventoryList },
+      {
+        goldValue: this.refs.goldValue,
+        inventoryButton: this.refs.inventoryButton,
+        inventoryModalGold: this.refs.inventoryModalGold,
+        inventoryModalList: this.refs.inventoryModalList,
+      },
       (itemId) => this.inventoryController.getItemTooltip(itemId),
     );
     renderCombatLog(this.state, { combatLog: this.refs.combatLog });
     renderCastMenu(this.state, { castMenu: this.refs.castMenu });
+    this.syncInventoryModalVisibility();
   }
 
   private renderAppMode(): void {
     if (this.appMode === 'character-creation') {
+      this.inventoryModalOpen = false;
+      this.syncInventoryModalVisibility();
       this.refs.gameRoot.style.display = 'none';
       this.refs.screenOverlay.style.display = 'block';
       this.refs.screenOverlay.innerHTML = getCharacterCreationOverlayHtml(this.creationDrafts, STARTING_ACCOUNT_GOLD);
@@ -171,6 +187,8 @@ export class AppController {
     }
 
     if (this.appMode === 'safe-zone' && this.profile) {
+      this.inventoryModalOpen = false;
+      this.syncInventoryModalVisibility();
       this.refs.gameRoot.style.display = 'none';
       this.refs.screenOverlay.style.display = 'block';
       this.refs.screenOverlay.innerHTML = getSafeZoneOverlayHtml({
@@ -182,12 +200,15 @@ export class AppController {
     }
 
     if (this.appMode === 'menu') {
+      this.inventoryModalOpen = false;
+      this.syncInventoryModalVisibility();
       this.refs.gameRoot.style.display = 'none';
       this.refs.screenOverlay.style.display = 'block';
       this.refs.screenOverlay.innerHTML = getStartMenuOverlayHtml(hasPersistedGameState(), this.profile !== null, this.accountGold);
       return;
     }
 
+    this.syncInventoryModalVisibility();
     renderAppMode(this.appMode, this.overlayMode, this.state, this.accountGold, this.profile !== null, {
       gameRoot: this.refs.gameRoot,
       screenOverlay: this.refs.screenOverlay,
@@ -363,7 +384,7 @@ export class AppController {
   }
 
   private bindInventoryEvents(): void {
-    this.refs.partyInventoryList.addEventListener('dragstart', (event) => {
+    this.refs.inventoryModalList.addEventListener('dragstart', (event) => {
       if (!this.isGameplayMode()) return;
       const target = event.target as HTMLElement | null;
       if (!target) return;
@@ -377,12 +398,12 @@ export class AppController {
       event.dataTransfer?.setData('text/plain', itemId);
     });
 
-    this.refs.partyInventoryList.addEventListener('dragover', (event) => {
+    this.refs.inventoryModalList.addEventListener('dragover', (event) => {
       if (!this.isGameplayMode()) return;
       event.preventDefault();
     });
 
-    this.refs.partyInventoryList.addEventListener('drop', (event) => {
+    this.refs.inventoryModalList.addEventListener('drop', (event) => {
       if (!this.isGameplayMode()) return;
       event.preventDefault();
       const payload = this.inventoryController.readDragPayload(event);
@@ -400,7 +421,20 @@ export class AppController {
     requireElement<HTMLButtonElement>('#menuButton').addEventListener('click', () => {
       if (!this.isGameplayMode()) return;
       this.overlayMode = 'pause-menu';
+      this.inventoryModalOpen = false;
+      this.syncInventoryModalVisibility();
       this.renderAppMode();
+    });
+
+    this.refs.inventoryButton.addEventListener('click', () => {
+      if (!this.isGameplayMode()) return;
+      this.inventoryModalOpen = !this.inventoryModalOpen;
+      this.syncInventoryModalVisibility();
+    });
+
+    requireElement<HTMLButtonElement>('#inventoryModalCloseButton').addEventListener('click', () => {
+      this.inventoryModalOpen = false;
+      this.syncInventoryModalVisibility();
     });
 
     this.refs.attackButton.addEventListener('click', () => {
@@ -844,6 +878,7 @@ export class AppController {
       refs: this.refs,
       ctx: this.ctx,
       minimapCtx: this.minimapCtx,
+      resultCtx: this.resultCtx,
       diceAnimation: this.diceAnimation,
       hudHeight: HUD_HEIGHT,
       nowMs: now,
@@ -915,5 +950,10 @@ export class AppController {
     }
 
     return unitId;
+  }
+
+  private syncInventoryModalVisibility(): void {
+    const isVisible = this.appMode === 'game' && this.inventoryModalOpen;
+    this.refs.inventoryModal.style.display = isVisible ? 'block' : 'none';
   }
 }

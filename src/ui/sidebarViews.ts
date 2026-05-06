@@ -106,6 +106,7 @@ export function renderCombatLogHtml(entries: readonly string[]): string {
   }
 
   return entries
+    .slice(0, 3)
     .map(
       (entry) =>
         `<div style="padding:6px; background:rgba(15,23,42,0.45); border:1px solid rgba(148,163,184,0.15);">${entry}</div>`,

@@ -1,3 +1,5 @@
+import { APP_VERSION } from '../app/version.js';
+
 export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): string {
   return `
     <div style="position:relative; width:100%; min-height:100vh; font-family: sans-serif; color:#cbd5e1; overflow:hidden;">
@@ -5,6 +7,28 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
         id="screenOverlay"
         style="display:none; position:absolute; inset:0; z-index:20; background:rgba(2,6,23,0.94); padding:24px; overflow:hidden;"
       ></div>
+      <div
+        id="inventoryModal"
+        style="display:none; position:absolute; right:24px; bottom:24px; z-index:15; width:320px; max-height:420px; border:1px solid rgba(148,163,184,0.28); background:rgba(2,6,23,0.96); box-shadow:0 16px 40px rgba(2,6,23,0.45);"
+      >
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid rgba(148,163,184,0.16);">
+          <div>
+            <div style="font-size:15px; color:#f8fafc;">Party inventory</div>
+            <div id="inventoryModalGold" style="font-size:12px; color:#94a3b8; margin-top:2px;">gold: 0</div>
+          </div>
+          <button
+            id="inventoryModalCloseButton"
+            type="button"
+            style="padding:6px 9px; border:1px solid rgba(148,163,184,0.28); background:rgba(30,41,59,0.72); color:#e2e8f0; cursor:pointer;"
+          >
+            close
+          </button>
+        </div>
+        <div
+          id="inventoryModalList"
+          style="display:flex; flex-direction:column; gap:6px; padding:14px; overflow:auto; max-height:340px;"
+        ></div>
+      </div>
       <div id="gameRoot" style="display:flex; gap:18px; align-items:flex-start; width:100%;">
         <div id="characterPanels" style="display:flex; flex-direction:column; gap:10px; width:380px; flex:0 0 380px;"></div>
         <div style="flex:1 1 auto; display:flex; justify-content:center;">
@@ -13,12 +37,15 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
             <div id="status" style="margin-top:8px; color:#cbd5e1; font-size:14px;"></div>
             <div id="controlsHint" style="margin-top:8px; color:#94a3b8; font-size:12px;"></div>
             <div style="margin-top:10px; font-size:14px; color:#94a3b8;">combat log</div>
-            <div id="combatLog" style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:#e2e8f0; margin-top:6px;"></div>
+            <div
+              id="combatLog"
+              style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:#e2e8f0; margin-top:6px; min-height:110px; max-height:110px; overflow:hidden;"
+            ></div>
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:12px; width:280px; flex:0 0 280px;">
           <canvas id="minimapCanvas" width="220" height="220" style="background:transparent"></canvas>
-          <div style="min-height:420px; padding:14px; background:rgba(15,23,42,0.55);">
+          <div style="min-height:456px; padding:14px; background:rgba(15,23,42,0.55);">
             <button
               id="menuButton"
               type="button"
@@ -63,10 +90,21 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
               skip turn
             </button>
             <div id="goldValue" style="margin-bottom:12px;">gold: 0</div>
-            <div style="font-size:14px; color:#94a3b8; margin-bottom:10px;">party inventory</div>
-            <div id="partyInventoryList" style="display:flex; flex-direction:column; gap:6px;"></div>
+            <button
+              id="inventoryButton"
+              type="button"
+              style="width:100%; margin-bottom:14px; padding:8px 10px; border:1px solid rgba(148,163,184,0.35); background:rgba(30,41,59,0.72); color:#e2e8f0; cursor:pointer;"
+            >
+              inventory
+            </button>
+            <div style="font-size:14px; color:#94a3b8; margin-bottom:10px;">combat result</div>
+            <canvas id="resultCanvas" width="252" height="236" style="background:rgba(2,6,23,0.65); border:1px solid rgba(148,163,184,0.16);"></canvas>
+            <div id="partyInventoryList" style="display:none;"></div>
           </div>
         </div>
+      </div>
+      <div style="position:absolute; left:16px; bottom:12px; z-index:10; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#64748b;">
+        v${APP_VERSION}
       </div>
     </div>
   `;

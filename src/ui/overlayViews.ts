@@ -1,5 +1,6 @@
 import type { RunState } from '../data/dungeonTypes.js';
 import type { CampaignProfile, HeroDraft } from '../app/types.js';
+import { APP_VERSION } from '../app/version.js';
 import { ITEM_DEFINITIONS } from '../items/items.js';
 import { SHOP_ITEMS } from '../items/shop.js';
 
@@ -22,6 +23,7 @@ export function getStartMenuOverlayHtml(hasSave: boolean, hasProfile: boolean, a
     <div style="width:min(1180px, calc(100vw - 48px)); min-height:clamp(360px, 68vh, 640px); margin:24px auto; padding:40px 48px; border:1px solid rgba(148,163,184,0.22); background:linear-gradient(135deg, rgba(15,23,42,0.96), rgba(30,41,59,0.88)); display:grid; grid-template-columns:minmax(0, 1.4fr) minmax(360px, 0.9fr); gap:40px; align-items:stretch; box-sizing:border-box; overflow:hidden;">
       <div style="display:flex; flex-direction:column; justify-content:center;">
         <div style="font-size:44px; line-height:1; color:#f8fafc; margin-bottom:14px;">SimpleHero</div>
+        <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:#64748b; margin-bottom:14px;">version ${APP_VERSION}</div>
         <div style="font-size:18px; color:#cbd5e1; margin-bottom:12px;">Short tactical dungeon runs with a 3-hero party.</div>
         <div style="font-size:14px; color:#94a3b8; max-width:520px;">Create your heroes, prepare them in a safe zone, then launch expeditions into the dungeon.</div>
         <div style="font-size:14px; color:#fbbf24; margin-top:18px;">Account gold: ${accountGold}</div>

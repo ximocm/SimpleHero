@@ -40,14 +40,19 @@ const COMBAT_ROLL_DAMAGE_MS = 600;
 export interface AppRenderRefs {
   canvas: HTMLCanvasElement;
   minimapCanvas: HTMLCanvasElement;
+  resultCanvas: HTMLCanvasElement;
   gameRoot: HTMLDivElement;
   screenOverlay: HTMLDivElement;
+  inventoryModal: HTMLDivElement;
+  inventoryModalGold: HTMLDivElement;
+  inventoryModalList: HTMLDivElement;
   status: HTMLDivElement;
   controlsHint: HTMLDivElement;
   characterPanels: HTMLDivElement;
   goldValue: HTMLDivElement;
   combatLog: HTMLDivElement;
   partyInventoryList: HTMLDivElement;
+  inventoryButton: HTMLButtonElement;
   attackButton: HTMLButtonElement;
   skillButton: HTMLButtonElement;
   castButton: HTMLButtonElement;
@@ -66,6 +71,7 @@ export interface FrameRenderArgs {
   refs: AppRenderRefs;
   ctx: CanvasRenderingContext2D;
   minimapCtx: CanvasRenderingContext2D;
+  resultCtx: CanvasRenderingContext2D;
   diceAnimation: CombatRollAnimationState | null;
   hudHeight: number;
   nowMs: number;
@@ -143,11 +149,13 @@ export function renderPartyInventory(
   state: GameState,
   partyInventory: readonly InventoryEntry[],
   accountGold: number,
-  refs: Pick<AppRenderRefs, 'goldValue' | 'partyInventoryList'>,
+  refs: Pick<AppRenderRefs, 'goldValue' | 'inventoryButton' | 'inventoryModalGold' | 'inventoryModalList'>,
   getItemTooltip: (itemId: string) => string,
 ): void {
   refs.goldValue.textContent = `run gold: ${state.runGold} | account gold: ${accountGold}`;
-  refs.partyInventoryList.innerHTML = renderPartyInventoryHtml(partyInventory, getItemTooltip);
+  refs.inventoryButton.textContent = `inventory (${partyInventory.length})`;
+  refs.inventoryModalGold.textContent = `run gold: ${state.runGold} | account gold: ${accountGold}`;
+  refs.inventoryModalList.innerHTML = renderPartyInventoryHtml(partyInventory, getItemTooltip);
 }
 
 export function renderCombatLog(
@@ -302,10 +310,8 @@ export function drawFrame(args: FrameRenderArgs): void {
   });
 
   drawHud(args);
-  if (args.appMode === 'game' && args.diceAnimation) {
-    drawCombatRollOverlay(args);
-  }
   drawMinimap(args, minimapCtx);
+  drawCombatResultPanel(args);
 }
 
 function drawTacticalPreviewOverlay(
@@ -557,10 +563,11 @@ function drawCombatRollOverlay(args: FrameRenderArgs): void {
   const fadeIn = Math.min(1, elapsed / 120);
   const fadeOut = Math.min(1, (COMBAT_ROLL_ANIMATION_TOTAL_MS - elapsed) / 220);
   const alpha = Math.max(0, Math.min(fadeIn, fadeOut));
-  const panelWidth = Math.min(args.refs.canvas.width - 80, 700);
-  const panelHeight = 208;
+  const sceneHeight = args.refs.canvas.height - args.hudHeight;
+  const panelWidth = Math.min(args.refs.canvas.width - 100, 820);
+  const panelHeight = Math.min(sceneHeight - 60, 360);
   const panelX = Math.floor((args.refs.canvas.width - panelWidth) / 2);
-  const panelY = 20;
+  const panelY = Math.floor((sceneHeight - panelHeight) / 2);
   const title = `${animation.attackerLabel} attacks ${animation.defenderLabel}`;
 
   const attackStart = COMBAT_ROLL_INTRO_MS;
@@ -572,25 +579,39 @@ function drawCombatRollOverlay(args: FrameRenderArgs): void {
 
   args.ctx.save();
   args.ctx.globalAlpha = alpha;
-  args.ctx.fillStyle = 'rgba(2, 6, 23, 0.96)';
+  args.ctx.fillStyle = '#020617';
+  args.ctx.fillRect(0, 0, args.refs.canvas.width, sceneHeight);
+  args.ctx.fillStyle = 'rgba(15, 23, 42, 0.96)';
   args.ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
   args.ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
   args.ctx.lineWidth = 2;
   args.ctx.strokeRect(panelX + 1, panelY + 1, panelWidth - 2, panelHeight - 2);
 
+  args.ctx.strokeStyle = 'rgba(59, 130, 246, 0.14)';
+  args.ctx.lineWidth = 1;
+  for (let ring = 0; ring < 4; ring += 1) {
+    const radius = 120 + ring * 70;
+    args.ctx.beginPath();
+    args.ctx.arc(panelX + panelWidth * 0.25, panelY + panelHeight * 0.5, radius, 0, Math.PI * 2);
+    args.ctx.stroke();
+    args.ctx.beginPath();
+    args.ctx.arc(panelX + panelWidth * 0.75, panelY + panelHeight * 0.5, radius, 0, Math.PI * 2);
+    args.ctx.stroke();
+  }
+
   args.ctx.fillStyle = '#f8fafc';
-  args.ctx.font = 'bold 20px sans-serif';
+  args.ctx.font = 'bold 30px sans-serif';
   args.ctx.textAlign = 'center';
   args.ctx.textBaseline = 'top';
-  args.ctx.fillText(title, panelX + panelWidth / 2, panelY + 16);
+  args.ctx.fillText(title, panelX + panelWidth / 2, panelY + 24);
 
   args.ctx.fillStyle = '#94a3b8';
-  args.ctx.font = '13px sans-serif';
-  args.ctx.fillText(getCombatRollStageLabel(elapsed, defenseStart, comparisonStart, damageStart), panelX + panelWidth / 2, panelY + 44);
+  args.ctx.font = '16px sans-serif';
+  args.ctx.fillText(getCombatRollStageLabel(elapsed, defenseStart, comparisonStart, damageStart), panelX + panelWidth / 2, panelY + 64);
 
   drawDiceRow(args.ctx, {
-    x: panelX + 24,
-    y: panelY + 72,
+    x: panelX + 40,
+    y: panelY + 118,
     label: 'Attack',
     rolls: animation.roll.attackRolls,
     resolvedValues: animation.roll.attackHits,
@@ -598,12 +619,13 @@ function drawCombatRollOverlay(args: FrameRenderArgs): void {
     stageProgress: getStageProgress(elapsed, attackStart, COMBAT_ROLL_ATTACK_MS),
     nowMs: args.nowMs,
     resolvedLabelPrefix: 'hit',
+    dieSize: 60,
   });
 
   if (elapsed >= defenseStart - 120) {
     drawDiceRow(args.ctx, {
-      x: panelX + 24,
-      y: panelY + 126,
+      x: panelX + 40,
+      y: panelY + 214,
       label: 'Defense',
       rolls: animation.roll.defenseRolls,
       resolvedValues: animation.roll.blockedHits,
@@ -611,14 +633,15 @@ function drawCombatRollOverlay(args: FrameRenderArgs): void {
       stageProgress: getStageProgress(elapsed, defenseStart, COMBAT_ROLL_DEFENSE_MS),
       nowMs: args.nowMs,
       resolvedLabelPrefix: 'block',
+      dieSize: 60,
     });
   }
 
   if (elapsed >= comparisonStart) {
     drawComparisonRow(
       args.ctx,
-      panelX + panelWidth - 252,
-      panelY + 74,
+      panelX + panelWidth - 286,
+      panelY + 124,
       animation.roll.totalAttackHits,
       animation.roll.totalBlockedHits,
       animation.roll.effectiveHits,
@@ -629,8 +652,8 @@ function drawCombatRollOverlay(args: FrameRenderArgs): void {
   if (elapsed >= damageStart) {
     drawDamageBadge(
       args.ctx,
-      panelX + panelWidth - 252,
-      panelY + 138,
+      panelX + panelWidth - 286,
+      panelY + 234,
       animation.roll.finalDamage,
       Math.min(1, (elapsed - damageStart) / COMBAT_ROLL_DAMAGE_MS),
     );
@@ -673,6 +696,129 @@ function drawMinimap(args: FrameRenderArgs, minimapCtx: CanvasRenderingContext2D
   });
 }
 
+function drawCombatRollSidebarPanel(
+  args: FrameRenderArgs,
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+): void {
+  const roll = args.state.lastCombatRoll;
+  if (!roll) return;
+
+  const animation = args.diceAnimation?.roll === roll ? args.diceAnimation : null;
+  const elapsed = animation ? Math.max(0, args.nowMs - animation.startedAt) : COMBAT_ROLL_ANIMATION_TOTAL_MS;
+  const alpha = animation
+    ? Math.max(0.45, Math.min(Math.min(1, elapsed / 120), Math.min(1, (COMBAT_ROLL_ANIMATION_TOTAL_MS - elapsed) / 220)))
+    : 1;
+  const attackStart = COMBAT_ROLL_INTRO_MS;
+  const attackEnd = attackStart + COMBAT_ROLL_ATTACK_MS;
+  const defenseStart = attackEnd + COMBAT_ROLL_ATTACK_PAUSE_MS;
+  const defenseEnd = defenseStart + COMBAT_ROLL_DEFENSE_MS;
+  const comparisonStart = defenseEnd + COMBAT_ROLL_DEFENSE_PAUSE_MS;
+  const damageStart = comparisonStart + COMBAT_ROLL_COMPARISON_MS;
+  const attackerLabel = animation?.attackerLabel ?? getCombatantLabel(args.state, roll.attackerId);
+  const defenderLabel = animation?.defenderLabel ?? getCombatantLabel(args.state, roll.defenderId);
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText(fitLabel(attackerLabel, 20), width / 2, 12);
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText(`vs ${fitLabel(defenderLabel, 20)}`, width / 2, 29);
+  ctx.fillText(
+    animation ? getCombatRollStageLabel(elapsed, defenseStart, comparisonStart, damageStart) : 'Last combat roll',
+    width / 2,
+    46,
+  );
+
+  drawDiceRow(ctx, {
+    x: 12,
+    y: 74,
+    label: 'Atk',
+    rolls: roll.attackRolls,
+    resolvedValues: roll.attackHits,
+    color: '#f97316',
+    stageProgress: getStageProgress(elapsed, attackStart, COMBAT_ROLL_ATTACK_MS),
+    nowMs: args.nowMs,
+    resolvedLabelPrefix: 'h',
+    dieSize: 24,
+    showResolvedLabels: false,
+  });
+
+  if (elapsed >= defenseStart - 120) {
+    drawDiceRow(ctx, {
+      x: 12,
+      y: 110,
+      label: 'Def',
+      rolls: roll.defenseRolls,
+      resolvedValues: roll.blockedHits,
+      color: '#38bdf8',
+      stageProgress: getStageProgress(elapsed, defenseStart, COMBAT_ROLL_DEFENSE_MS),
+      nowMs: args.nowMs,
+      resolvedLabelPrefix: 'b',
+      dieSize: 24,
+      showResolvedLabels: false,
+    });
+  }
+
+  if (elapsed >= comparisonStart) {
+    const summaryAlpha = Math.max(0.2, Math.min(1, (elapsed - comparisonStart) / COMBAT_ROLL_COMPARISON_MS));
+    ctx.save();
+    ctx.globalAlpha = summaryAlpha;
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(
+      `Hits ${roll.totalAttackHits}  Blocks ${roll.totalBlockedHits}  Net ${roll.effectiveHits}`,
+      12,
+      156,
+    );
+    ctx.restore();
+  }
+
+  if (elapsed >= damageStart) {
+    drawDamageBadge(
+      ctx,
+      12,
+      172,
+      roll.finalDamage,
+      Math.min(1, (elapsed - damageStart) / COMBAT_ROLL_DAMAGE_MS),
+      width - 24,
+      34,
+    );
+  }
+
+  ctx.restore();
+}
+
+function drawCombatResultPanel(args: FrameRenderArgs): void {
+  const { resultCtx, refs } = args;
+  resultCtx.clearRect(0, 0, refs.resultCanvas.width, refs.resultCanvas.height);
+  if (args.appMode !== 'game' || !args.state.lastCombatRoll) {
+    resultCtx.fillStyle = '#020617';
+    resultCtx.fillRect(0, 0, refs.resultCanvas.width, refs.resultCanvas.height);
+    resultCtx.fillStyle = '#64748b';
+    resultCtx.font = '13px sans-serif';
+    resultCtx.textAlign = 'center';
+    resultCtx.textBaseline = 'middle';
+    resultCtx.fillText('No combat result yet', refs.resultCanvas.width / 2, refs.resultCanvas.height / 2);
+    return;
+  }
+
+  drawCombatRollSidebarPanel(args, resultCtx, refs.resultCanvas.width, refs.resultCanvas.height);
+}
+
 function drawDiceRow(
   ctx: CanvasRenderingContext2D,
   args: {
@@ -685,20 +831,22 @@ function drawDiceRow(
     stageProgress: number;
     nowMs: number;
     resolvedLabelPrefix: string;
+    dieSize?: number;
+    showResolvedLabels?: boolean;
   },
 ): void {
-  const dieSize = 42;
-  const gap = 10;
+  const dieSize = args.dieSize ?? 42;
+  const gap = Math.max(10, Math.floor(dieSize * 0.24));
   const settleStart = 0.28;
   const settleSpan = 0.72;
 
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#cbd5e1';
-  ctx.font = 'bold 14px sans-serif';
+  ctx.font = `bold ${Math.max(14, Math.floor(dieSize * 0.33))}px sans-serif`;
   ctx.fillText(args.label, args.x, args.y + dieSize / 2);
 
-  const diceStartX = args.x + 76;
+  const diceStartX = args.x + Math.max(76, Math.floor(dieSize * 1.8));
   const safeCount = Math.max(1, args.rolls.length);
 
   for (let index = 0; index < args.rolls.length; index += 1) {
@@ -720,14 +868,14 @@ function drawDiceRow(
     ctx.strokeRect(dieX + 0.5, args.y + 0.5, dieSize - 1, dieSize - 1);
 
     ctx.fillStyle = '#f8fafc';
-    ctx.font = 'bold 22px sans-serif';
+    ctx.font = `bold ${Math.max(22, Math.floor(dieSize * 0.5))}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(String(displayValue), dieX + dieSize / 2, args.y + dieSize / 2 + 1);
 
-    if (isSettled) {
+    if (isSettled && args.showResolvedLabels !== false) {
       ctx.fillStyle = resolvedValue > 0 ? '#fbbf24' : '#64748b';
-      ctx.font = '11px sans-serif';
-      ctx.fillText(`${args.resolvedLabelPrefix} ${resolvedValue}`, dieX + dieSize / 2, args.y + dieSize + 14);
+      ctx.font = `${Math.max(11, Math.floor(dieSize * 0.22))}px sans-serif`;
+      ctx.fillText(`${args.resolvedLabelPrefix} ${resolvedValue}`, dieX + dieSize / 2, args.y + dieSize + Math.max(14, Math.floor(dieSize * 0.32)));
     }
   }
 }
@@ -740,10 +888,10 @@ function drawComparisonRow(
   blockedHits: number,
   effectiveHits: number,
   progress: number,
+  boxWidth = 68,
+  gap = 10,
 ): void {
   const alpha = Math.max(0.2, progress);
-  const boxWidth = 68;
-  const gap = 10;
   const entries = [
     { label: 'hits', value: attackHits, color: '#fb923c' },
     { label: 'blocks', value: blockedHits, color: '#38bdf8' },
@@ -779,11 +927,11 @@ function drawDamageBadge(
   y: number,
   damage: number,
   progress: number,
+  width = 224,
+  height = 46,
 ): void {
   const alpha = Math.max(0.25, progress);
   const scale = 0.9 + Math.min(1, progress) * 0.1;
-  const width = 224;
-  const height = 46;
   const centerX = x + width / 2;
   const centerY = y + height / 2;
 
@@ -827,6 +975,28 @@ function getStageProgress(
   if (elapsed <= stageStart) return 0;
   if (elapsed >= stageStart + stageDuration) return 1;
   return (elapsed - stageStart) / stageDuration;
+}
+
+function getCombatantLabel(state: GameState, unitId: string): string {
+  const hero = state.party.heroes.find((candidate) => candidate.id === unitId);
+  if (hero) return hero.name;
+
+  for (const roomEnemies of state.dungeon.enemiesByRoomId.values()) {
+    const enemy = roomEnemies.find((candidate) => candidate.id === unitId);
+    if (enemy) {
+      return enemy.kind
+        .split('-')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    }
+  }
+
+  return unitId;
+}
+
+function fitLabel(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function getSelectedHeroWeaponSummary(state: GameState): string {

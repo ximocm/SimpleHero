@@ -10,6 +10,7 @@ export type TurnUnitKind = 'hero' | 'enemy';
 export type CombatPhase = 'heroes' | 'enemies';
 export type RunState = 'active' | 'won' | 'lost';
 export type SpellId = 'heal' | 'fireball' | 'ice';
+export type SkillId = 'power-strike' | 'dash' | 'quick-shot';
 
 export interface Coord {
   x: number;
@@ -122,6 +123,10 @@ export interface HeroState {
   roomId: string;
   tile: Coord;
   facing: Direction;
+  skillCooldowns: Partial<Record<SkillId, number>>;
+  skillEffects: {
+    powerStrikeDamageBonus: number;
+  };
 }
 
 export interface HeroSkillState {

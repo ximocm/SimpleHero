@@ -12,6 +12,7 @@ import type {
   RoomType,
   RunState,
   SpellId,
+  SkillId,
 } from '../data/dungeonTypes.js';
 import { isWalkable, TileType } from '../data/tileTypes.js';
 import {
@@ -30,6 +31,7 @@ import {
   performFireballSpell,
   performHealSpell,
   performHeroAttack,
+  performHeroSkillOnSelf,
   performIceSpell,
 } from './combatSystem.js';
 import { CONSUMABLE_DEFINITIONS } from '../items/consumables.js';
@@ -37,6 +39,7 @@ import { TREASURE_DEFINITIONS } from '../items/treasures.js';
 import { CLASS_DEFINITIONS } from '../heroes/classes.js';
 import { SPELL_DEFINITIONS } from '../magic/spells.js';
 import { canHeroCastSpells, getHeroAttackRange } from './weaponSystem.js';
+import { SKILL_DEFINITIONS } from '../heroes/skills.js';
 import {
   canHeroActNow,
   canSelectHeroThisPhase,
@@ -62,7 +65,9 @@ export interface GameState {
   combatRngState: number;
   attackModeHeroId: string | null;
   castModeHeroId: string | null;
+  skillModeHeroId: string | null;
   selectedSpellId: SpellId | null;
+  selectedSkillId: SkillId | null;
   itemUseModeHeroId: string | null;
   recentCombatLog: string[];
   lastCombatRoll: CombatRollSnapshot | null;
@@ -167,7 +172,9 @@ export function createGameState(seed: number, roster?: readonly HeroRosterEntry[
     combatRngState: (seed ^ 0x9e3779b9) >>> 0,
     attackModeHeroId: null,
     castModeHeroId: null,
+    skillModeHeroId: null,
     selectedSpellId: null,
+    selectedSkillId: null,
     itemUseModeHeroId: null,
     recentCombatLog: [],
     lastCombatRoll: null,
@@ -261,6 +268,7 @@ export function commitMoveFromHover(state: GameState): void {
   if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) return;
   if (state.attackModeHeroId) return;
   if (state.castModeHeroId) return;
+  if (state.skillModeHeroId) return;
   if (state.itemUseModeHeroId) return;
   if (state.hoverPath.length < 2) return;
   state.movingPath = [...state.hoverPath];
@@ -277,6 +285,7 @@ export function stepMovement(state: GameState): boolean {
   if (state.readyByHeroId.has(hero.id) || !canHeroActNow(state, hero.id)) return false;
   if (state.attackModeHeroId) return false;
   if (state.castModeHeroId) return false;
+  if (state.skillModeHeroId) return false;
   if (state.itemUseModeHeroId) return false;
   if (state.movingPath.length < 2) return false;
 
@@ -654,7 +663,9 @@ export function toggleAttackMode(state: GameState): boolean {
   state.spellPreviewTiles = [];
   state.attackModeHeroId = state.attackModeHeroId === hero.id ? null : hero.id;
   state.castModeHeroId = null;
+  state.skillModeHeroId = null;
   state.selectedSpellId = null;
+  state.selectedSkillId = null;
   state.itemUseModeHeroId = null;
   return state.attackModeHeroId === hero.id;
 }
@@ -684,7 +695,9 @@ export function tryHeroAttackAtTile(state: GameState, target: Coord): boolean {
   hero.skillState.powerStrikeArmed = false;
   state.attackModeHeroId = null;
   state.castModeHeroId = null;
+  state.skillModeHeroId = null;
   state.selectedSpellId = null;
+  state.selectedSkillId = null;
   state.itemUseModeHeroId = null;
   state.hoverPath = [];
   state.spellPreviewTiles = [];
@@ -944,6 +957,73 @@ export function isEnemySpellTargetable(state: GameState, heroId: string, enemyId
  * @param state Game state.
  * @returns `true` when item use mode is now active.
  */
+
+export function canHeroUseSkill(state: GameState, heroId: string, skillId: SkillId): boolean {
+  const hero = state.party.heroes.find((candidate) => candidate.id === heroId);
+  const skill = SKILL_DEFINITIONS[skillId];
+  const resources = state.turn?.heroResourcesById[heroId];
+  if (!hero || hero.hp <= 0 || !skill || !resources) return false;
+  if (!canHeroActNow(state, heroId) || hero.className !== skill.classRestriction) return false;
+  if (resources.actionPointsRemaining < skill.actionPointCost) return false;
+  if (skill.consumesAttackSlot && !resources.attackSlotAvailable) return false;
+  if ((hero.skillCooldowns[skillId] ?? 0) > 0) return false;
+  if (skill.requiredEquipmentTags?.includes('bow')) {
+    return hero.equipment.leftHand === 'bow' || hero.equipment.rightHand === 'bow';
+  }
+  if (skill.requiredEquipmentTags?.includes('melee-weapon')) {
+    return [hero.equipment.leftHand, hero.equipment.rightHand].some((h) => h === 'short-sword' || h === 'two-hand-sword');
+  }
+  return true;
+}
+
+export function toggleSkillMode(state: GameState): boolean {
+  if (state.runState !== 'active') return false;
+  const hero = getActiveHero(state.party);
+  state.attackModeHeroId = null;
+  state.castModeHeroId = null;
+  state.itemUseModeHeroId = null;
+  state.skillModeHeroId = state.skillModeHeroId === hero.id ? null : hero.id;
+  state.selectedSkillId = null;
+  return state.skillModeHeroId === hero.id;
+}
+
+export function selectActiveHeroSkill(state: GameState, skillId: SkillId): boolean {
+  const hero = getActiveHero(state.party);
+  if (state.skillModeHeroId !== hero.id) return false;
+  if (!canHeroUseSkill(state, hero.id, skillId)) return false;
+  state.selectedSkillId = skillId;
+  return true;
+}
+
+export function tryHeroUseSkillAtTile(state: GameState, target: Coord): boolean {
+  const hero = getActiveHero(state.party);
+  if (state.skillModeHeroId !== hero.id || !state.selectedSkillId) return false;
+  const skillId = state.selectedSkillId;
+  if (!canHeroUseSkill(state, hero.id, skillId)) return false;
+  const skill = SKILL_DEFINITIONS[skillId];
+  const resources = state.turn?.heroResourcesById[hero.id];
+  if (!resources) return false;
+  if (skillId === 'dash' || skillId === 'power-strike') {
+    const result = performHeroSkillOnSelf(hero, skillId);
+    if (skillId === 'dash') resources.movementRemaining += 2;
+    resources.actionPointsRemaining -= skill.actionPointCost;
+    hero.skillCooldowns[skillId] = skill.cooldownTurns;
+    state.recentCombatLog.unshift(...result.logEntries);
+  } else {
+    const enemy = getCurrentRoomEnemies(state).find((e) => e.hp > 0 && sameCoord(e.tile, target));
+    if (!enemy || manhattanDistance(hero.tile, enemy.tile) > getHeroAttackRange(hero)) return false;
+    const result = performHeroAttack(state, hero, enemy);
+    resources.actionPointsRemaining -= skill.actionPointCost;
+    resources.attackSlotAvailable = false;
+    hero.skillCooldowns[skillId] = skill.cooldownTurns;
+    state.recentCombatLog.unshift(`${hero.className} used ${skill.name} on ${enemy.kind} | dmg ${result.roll.finalDamage}`);
+  }
+  state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  state.skillModeHeroId = null;
+  state.selectedSkillId = null;
+  return true;
+}
+
 export function toggleItemUseMode(state: GameState): boolean {
   if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
@@ -986,7 +1066,9 @@ export function useActiveHeroBackpackConsumable(state: GameState, itemId: string
   }
   state.attackModeHeroId = null;
   state.castModeHeroId = null;
+  state.skillModeHeroId = null;
   state.selectedSpellId = null;
+  state.selectedSkillId = null;
   state.itemUseModeHeroId = null;
   state.recentCombatLog.unshift(`${hero.className} used ${consumable.name} and restored ${consumable.value} HP`);
   state.recentCombatLog = state.recentCombatLog.slice(0, 6);

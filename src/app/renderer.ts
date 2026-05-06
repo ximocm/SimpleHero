@@ -45,6 +45,7 @@ export interface AppRenderRefs {
   castButton: HTMLButtonElement;
   castMenu: HTMLDivElement;
   useItemButton: HTMLButtonElement;
+  skipTurnButton: HTMLButtonElement;
 }
 
 export interface FrameRenderArgs {
@@ -527,6 +528,10 @@ function drawHud(args: FrameRenderArgs): void {
   refs.useItemButton.disabled = state.runState !== 'active' || !canUseActiveHeroConsumable(state);
   refs.useItemButton.style.opacity = refs.useItemButton.disabled ? '0.5' : '1';
   refs.useItemButton.textContent = state.itemUseModeHeroId === activeHero.id ? 'cancel item' : 'use item';
+
+  refs.skipTurnButton.disabled = state.runState !== 'active' || !turn.isCombatActive || !isCurrentTurnHero(state);
+  refs.skipTurnButton.style.opacity = refs.skipTurnButton.disabled ? '0.5' : '1';
+  refs.skipTurnButton.textContent = 'skip turn';
 }
 
 function drawMinimap(args: FrameRenderArgs, minimapCtx: CanvasRenderingContext2D): void {

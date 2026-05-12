@@ -306,7 +306,7 @@ export function stepMovement(state: GameState): boolean {
   const movementRemaining = consumeHeroMovement(state, hero.id);
 
   refreshExitReady(state, hero.id, hero.tile);
-  maybeTransitionRoom(state);
+  maybeTransitionRoom(state, hero.id);
   if (movementRemaining <= 0) {
     state.hoverPath = [];
     state.movingPath = [];
@@ -376,22 +376,29 @@ function findExitDirection(room: RoomData, tile: Coord): Direction | null {
 }
 
 /**
- * Transitions party to next room when any living hero reaches a valid exit.
+ * Transitions party to next room when the moved hero reaches a valid exit.
  * @param state Game state to mutate.
+ * @param heroId Hero that just moved.
  * @returns Nothing.
  */
-function maybeTransitionRoom(state: GameState): void {
+function maybeTransitionRoom(state: GameState, heroId: string): void {
   const current = getCurrentRoom(state);
   if (isRoomEncounterBlockingExit(current)) {
     state.readyByHeroId.clear();
     return;
   }
 
-  const transitioningHero = state.party.heroes.find((hero) => hero.hp > 0 && state.readyByHeroId.has(hero.id));
-  if (!transitioningHero) return;
+  const transitioningHero = state.party.heroes.find((hero) => hero.id === heroId && hero.hp > 0);
+  if (!transitioningHero) {
+    state.readyByHeroId.delete(heroId);
+    return;
+  }
 
-  const direction = state.readyByHeroId.get(transitioningHero.id);
-  if (!direction) return;
+  const direction = findExitDirection(current, transitioningHero.tile);
+  if (!direction) {
+    state.readyByHeroId.delete(heroId);
+    return;
+  }
 
   const nextCoord = moveRoomCoord(current.coord, direction);
   const nextRoom = getRoomAt(state.dungeon, nextCoord);
@@ -411,8 +418,9 @@ function maybeTransitionRoom(state: GameState): void {
     .filter((enemy) => enemy.hp > 0)
     .map((enemy) => enemy.tile);
   const startTiles = getClosestAvailableWalkableTiles(nextRoom, entry, state.party.heroes.length, blockedTiles);
+  const entryOrder = getPartyEntryOrder(state.party.heroes, transitioningHero.id);
 
-  state.party.heroes.forEach((hero, index) => {
+  entryOrder.forEach((hero, index) => {
     hero.roomId = nextRoom.id;
     hero.tile = { ...startTiles[index] };
   });
@@ -432,6 +440,12 @@ function maybeTransitionRoom(state: GameState): void {
       state.recentCombatLog = state.recentCombatLog.slice(0, 6);
     }
   }
+}
+
+function getPartyEntryOrder(heroes: PartyState['heroes'], firstHeroId: string): PartyState['heroes'] {
+  const firstIndex = heroes.findIndex((hero) => hero.id === firstHeroId);
+  if (firstIndex < 0) return [...heroes];
+  return [...heroes.slice(firstIndex), ...heroes.slice(0, firstIndex)];
 }
 
 function getClosestAvailableWalkableTiles(

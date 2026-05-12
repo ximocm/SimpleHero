@@ -18,14 +18,6 @@ export function renderCharacterPanelsHtml(args: {
       const border = hero.isDefeated ? 'rgba(239,68,68,0.7)' : hero.isActive ? '#fbbf24' : 'rgba(148,163,184,0.25)';
       const badgeLabel = hero.isDefeated ? 'Defeated' : hero.isReadyAtExit ? 'Ready' : hero.isActive ? 'Active' : 'Idle';
       const badgeColor = hero.isDefeated ? '#f87171' : hero.isReadyAtExit ? '#22c55e' : hero.isActive ? '#fbbf24' : '#94a3b8';
-      const turnEconomy =
-        hero.isDefeated
-          ? 'Defeated'
-          : hero.movementRemaining !== null
-            ? `Move ${hero.movementRemaining} · AP ${hero.actionPointsRemaining ?? 0} · Attack ${
-                hero.attackSlotAvailable ? 'Ready' : 'Spent'
-              }`
-            : 'Move - · AP - · Attack -';
       const skillStatus =
         hero.className === 'Warrior' && hero.powerStrikeArmed
           ? 'Skill: Power Strike armed'
@@ -48,7 +40,7 @@ export function renderCharacterPanelsHtml(args: {
             <div style="width:${hpPercent}%; height:100%; background:#22c55e;"></div>
           </div>
           <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;">Body ${hero.body} · Mind ${hero.mind}</div>
-          <div style="font-size:11px; color:#93c5fd; margin-bottom:8px;">${turnEconomy}</div>
+          ${renderActionIcons(hero)}
           <div style="font-size:11px; color:#fbbf24; margin-bottom:8px;">${skillStatus}</div>
           <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; margin-bottom:6px;">
             ${renderEquipSlot(index, 'armor', 'A', hero.armor, itemById, getItemTooltip)}
@@ -69,6 +61,41 @@ export function renderCharacterPanelsHtml(args: {
       `;
     })
     .join('');
+}
+
+function renderActionIcons(hero: HeroPanelView): string {
+  if (hero.isDefeated) {
+    return '<div style="font-size:11px; color:#f87171; margin-bottom:8px;">Defeated</div>';
+  }
+
+  const hasTurnResources = hero.movementRemaining !== null;
+  const moveReady = hasTurnResources && (hero.movementRemaining ?? 0) > 0;
+  const apReady = hasTurnResources && (hero.actionPointsRemaining ?? 0) > 0;
+  const attackReady = hasTurnResources && hero.attackSlotAvailable === true;
+  const skillReady = hasTurnResources && hero.skillCooldownRemaining === 0;
+
+  return `
+    <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:5px; margin-bottom:8px;">
+      ${renderActionIcon('MOV', hasTurnResources ? `${hero.movementRemaining ?? 0}` : '-', moveReady)}
+      ${renderActionIcon('AP', hasTurnResources ? `${hero.actionPointsRemaining ?? 0}` : '-', apReady)}
+      ${renderActionIcon('ATK', hero.attackSlotAvailable === null ? '-' : hero.attackSlotAvailable ? 'ready' : 'spent', attackReady)}
+      ${renderActionIcon('SKL', hero.skillCooldownRemaining > 0 ? `${hero.skillCooldownRemaining}` : 'ready', skillReady)}
+    </div>
+  `;
+}
+
+function renderActionIcon(label: string, value: string, isReady: boolean): string {
+  const border = isReady ? 'rgba(251,191,36,0.75)' : 'rgba(71,85,105,0.55)';
+  const background = isReady ? 'rgba(120,53,15,0.54)' : 'rgba(15,23,42,0.75)';
+  const labelColor = isReady ? '#fef3c7' : '#64748b';
+  const valueColor = isReady ? '#fde68a' : '#475569';
+
+  return `
+    <div title="${escapeAttr(`${label} ${value}`)}" style="min-height:34px; border:1px solid ${border}; background:${background}; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;">
+      <div style="font-size:10px; font-weight:700; color:${labelColor}; line-height:1;">${label}</div>
+      <div style="font-size:9px; color:${valueColor}; line-height:1; text-transform:uppercase;">${value}</div>
+    </div>
+  `;
 }
 
 export function renderPartyInventoryHtml(

@@ -32,7 +32,16 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
       <div id="gameRoot" style="display:flex; gap:18px; align-items:flex-start; width:100%;">
         <div id="characterPanels" style="display:flex; flex-direction:column; gap:10px; width:380px; flex:0 0 380px;"></div>
         <div style="flex:1 1 auto; display:flex; justify-content:center;">
-          <div style="width:${canvasWidth}px;">
+          <div style="width:${canvasWidth}px; position:relative;">
+            <div style="display:flex; justify-content:center; margin-bottom:8px;">
+              <button
+                id="skipTurnButton"
+                type="button"
+                style="min-width:190px; padding:8px 12px; border:1px solid rgba(96,165,250,0.45); background:rgba(30,64,175,0.45); color:#dbeafe; cursor:pointer;"
+              >
+                end heroes phase
+              </button>
+            </div>
             <canvas id="gameCanvas" width="${canvasWidth}" height="${canvasHeight}" style="background:transparent"></canvas>
             <div id="status" style="margin-top:8px; color:#cbd5e1; font-size:14px;"></div>
             <div id="controlsHint" style="margin-top:8px; color:#94a3b8; font-size:12px;"></div>
@@ -81,13 +90,6 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
               style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(74,222,128,0.45); background:rgba(20,83,45,0.45); color:#dcfce7; cursor:pointer;"
             >
               use item
-            </button>
-            <button
-              id="skipTurnButton"
-              type="button"
-              style="width:100%; margin-bottom:12px; padding:8px 10px; border:1px solid rgba(96,165,250,0.45); background:rgba(30,64,175,0.45); color:#dbeafe; cursor:pointer;"
-            >
-              skip turn
             </button>
             <div id="goldValue" style="margin-bottom:12px;">gold: 0</div>
             <button

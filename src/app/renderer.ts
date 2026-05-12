@@ -3,7 +3,6 @@ import { TileType } from '../data/tileTypes.js';
 import { SPELL_DEFINITIONS } from '../magic/spells.js';
 import {
   canWalkTile,
-  canHeroBasicAttackEnemy,
   canHeroCastSpellOnHero,
   canUseActiveHeroConsumable,
   getActiveHeroCastActionView,
@@ -12,7 +11,6 @@ import {
   getCurrentRoom,
   getCurrentRoomCoordId,
   getCurrentRoomEncounterView,
-  getCurrentRoomEnemies,
   getCurrentRoomEnemyViews,
   getHeroPanelViews,
   getSelectedSpellDefinition,
@@ -522,12 +520,16 @@ function drawHud(args: FrameRenderArgs): void {
                 : 'Mouse hover = A* preview | Click = move/attack target | 1/2/3 or click card = active hero';
 
   const activeHero = state.party.heroes[state.party.activeHeroIndex];
-  const hasAttackTarget =
-    state.turn?.phase === 'heroes' &&
-    getCurrentRoomEnemies(state).some((enemy) => canHeroBasicAttackEnemy(state, activeHero.id, enemy.id));
-  refs.attackButton.disabled = state.runState !== 'active' || !turn.isCombatActive || !isCurrentTurnHero(state);
-  refs.attackButton.style.opacity = refs.attackButton.disabled ? '0.5' : '1';
-  refs.attackButton.textContent = state.attackModeHeroId === activeHero.id ? 'cancel attack' : hasAttackTarget ? 'basic attack' : 'basic attack';
+  const activeResources = turn.heroResources;
+  const hasAttackSlot = activeResources?.attackSlotAvailable !== false;
+  refs.attackButton.disabled = state.runState !== 'active' || !turn.isCombatActive || !isCurrentTurnHero(state) || !hasAttackSlot;
+  refs.attackButton.style.opacity = refs.attackButton.disabled ? '0.45' : '1';
+  refs.attackButton.style.background = refs.attackButton.disabled ? 'rgba(15,23,42,0.72)' : 'rgba(120,53,15,0.45)';
+  refs.attackButton.style.borderColor = refs.attackButton.disabled ? 'rgba(71,85,105,0.55)' : 'rgba(251,191,36,0.45)';
+  refs.attackButton.style.color = refs.attackButton.disabled ? '#64748b' : '#fef3c7';
+  refs.attackButton.style.cursor = refs.attackButton.disabled ? 'default' : 'pointer';
+  refs.attackButton.textContent =
+    state.attackModeHeroId === activeHero.id ? 'cancel attack' : hasAttackSlot || !turn.isCombatActive ? 'basic attack' : 'basic attack spent';
 
   const skillAction = getActiveHeroSkillActionView(state);
   refs.skillButton.disabled = state.runState !== 'active' || activeHero.className === 'Mage' || !skillAction.isAvailable;
@@ -550,7 +552,7 @@ function drawHud(args: FrameRenderArgs): void {
 
   refs.skipTurnButton.disabled = state.runState !== 'active' || !turn.isCombatActive || !isCurrentTurnHero(state);
   refs.skipTurnButton.style.opacity = refs.skipTurnButton.disabled ? '0.5' : '1';
-  refs.skipTurnButton.textContent = 'skip turn';
+  refs.skipTurnButton.textContent = 'end heroes phase';
 }
 
 function drawCombatRollOverlay(args: FrameRenderArgs): void {

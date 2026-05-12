@@ -482,6 +482,8 @@ function sanitizeCombatRoll(value: CombatRollSnapshot | null): CombatRollSnapsho
     totalAttackHits: toInt(value.totalAttackHits, 0),
     totalBlockedHits: toInt(value.totalBlockedHits, 0),
     effectiveHits: toInt(value.effectiveHits, 0),
+    weaponDamage: toInt(value.weaponDamage, 0),
+    skillBonus: toInt(value.skillBonus, 0),
     finalDamage: toInt(value.finalDamage, 0),
   };
 }

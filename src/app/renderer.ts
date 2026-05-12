@@ -258,7 +258,8 @@ export function drawFrame(args: FrameRenderArgs): void {
   }
 
   state.party.heroes.forEach((hero, index) => {
-    if (hero.hp <= 0) return;
+    const displayHp = getDisplayedHpDuringCombatRoll(hero.id, hero.hp, hero.maxHp, args);
+    if (displayHp <= 0) return;
     if (state.readyByHeroId.has(hero.id)) return;
 
     const cx = offset.x + hero.tile.x * tileSize + tileSize / 2;
@@ -294,7 +295,7 @@ export function drawFrame(args: FrameRenderArgs): void {
       x: cx,
       y: cy + radius + 10,
       width: Math.max(32, tileSize * 0.62),
-      hp: hero.hp,
+      hp: displayHp,
       maxHp: hero.maxHp,
       fill: '#22c55e',
       text: '#dcfce7',
@@ -303,7 +304,8 @@ export function drawFrame(args: FrameRenderArgs): void {
 
   const roomEnemies = getCurrentRoomEnemyViews(state);
   roomEnemies.forEach((enemy) => {
-    if (enemy.hp <= 0) return;
+    const displayHp = getDisplayedHpDuringCombatRoll(enemy.id, enemy.hp, enemy.maxHp, args);
+    if (displayHp <= 0) return;
 
     const renderTile = getAnimatedEnemyTile(enemy.id, enemy.tile, args.nowMs);
     const cx = offset.x + renderTile.x * tileSize + tileSize / 2;
@@ -327,7 +329,7 @@ export function drawFrame(args: FrameRenderArgs): void {
       x: cx,
       y: cy + radius + 10,
       width: Math.max(30, tileSize * 0.58),
-      hp: enemy.hp,
+      hp: displayHp,
       maxHp: enemy.maxHp,
       fill: '#fb7185',
       text: '#ffe4e6',
@@ -337,6 +339,20 @@ export function drawFrame(args: FrameRenderArgs): void {
   drawHud(args);
   drawMinimap(args, minimapCtx);
   drawCombatResultPanel(args);
+}
+
+function getDisplayedHpDuringCombatRoll(
+  unitId: string,
+  actualHp: number,
+  maxHp: number,
+  args: Pick<FrameRenderArgs, 'diceAnimation' | 'nowMs'>,
+): number {
+  const animation = args.diceAnimation;
+  if (!animation || animation.roll.defenderId !== unitId || args.nowMs >= animation.endsAt) {
+    return actualHp;
+  }
+
+  return Math.min(maxHp, actualHp + animation.roll.finalDamage);
 }
 
 function getAnimatedEnemyTile(enemyId: string, tile: Coord, nowMs: number): Coord {
@@ -1054,6 +1070,7 @@ function getCombatRollStageLabel(
   if (elapsed < defenseStart) return 'Attack dice';
   if (elapsed < comparisonStart) return 'Defense dice';
   if (elapsed < damageStart) return 'Compare hits';
+  if (elapsed >= damageStart + COMBAT_ROLL_DAMAGE_MS) return 'Result';
   return 'Final damage';
 }
 
@@ -1106,7 +1123,8 @@ function getSelectedHeroCastingSummary(state: GameState): string {
 function getLastRollSummary(state: GameState): string {
   const roll = state.lastCombatRoll;
   if (!roll) return '';
-  return `Last roll atk[${roll.attackRolls.join(',')}] def[${roll.defenseRolls.join(',')}] dmg ${roll.finalDamage}`;
+  const bonus = roll.skillBonus > 0 ? ` + Skill Bonus ${roll.skillBonus}` : '';
+  return `Last roll Attack Dice [${roll.attackRolls.join(',')}] | Blocked Hits ${roll.totalBlockedHits} | Effective Hits ${roll.effectiveHits} | Weapon Damage ${roll.weaponDamage}${bonus} | Final Damage ${roll.finalDamage}`;
 }
 
 function facingTriangle(

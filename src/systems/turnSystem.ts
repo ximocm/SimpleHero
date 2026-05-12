@@ -1,5 +1,6 @@
 import type {
   CombatTurnState,
+  CombatRollSnapshot,
   Coord,
   EnemyState,
   HeroState,
@@ -387,7 +388,7 @@ function resolveEnemyTurn(state: GameState, enemyId: string): void {
     const result = performEnemyAttack(state, enemy, target);
     state.lastCombatRoll = result.roll;
     state.recentCombatLog.unshift(
-      `${enemy.kind} -> ${target.className} | atk [${result.roll.attackRolls.join(',')}] def [${result.roll.defenseRolls.join(',')}] dmg ${result.roll.finalDamage}${result.defenderDefeated ? ' | defeated' : ''}`,
+      formatCombatLogEntry(enemy.kind, target.className, result.roll, result.defenderDefeated),
     );
     state.recentCombatLog = state.recentCombatLog.slice(0, 6);
     enemy.statusEffects.rootedTurns = Math.max(0, enemy.statusEffects.rootedTurns - 1);
@@ -432,7 +433,7 @@ function resolveSkeletonArcherTurn(
     const result = performEnemyAttack(state, enemy, inRangeTarget);
     state.lastCombatRoll = result.roll;
     state.recentCombatLog.unshift(
-      `${enemy.kind} -> ${inRangeTarget.className} | atk [${result.roll.attackRolls.join(',')}] def [${result.roll.defenseRolls.join(',')}] dmg ${result.roll.finalDamage}${result.defenderDefeated ? ' | defeated' : ''}`,
+      formatCombatLogEntry(enemy.kind, inRangeTarget.className, result.roll, result.defenderDefeated),
     );
     state.recentCombatLog = state.recentCombatLog.slice(0, 6);
     return;
@@ -565,4 +566,14 @@ function isWalkableCoord(room: RoomData, coord: Coord): boolean {
 
 function manhattanDistance(a: Coord, b: Coord): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+function formatCombatLogEntry(
+  attackerLabel: string,
+  defenderLabel: string,
+  roll: CombatRollSnapshot,
+  defenderDefeated: boolean,
+): string {
+  const bonus = roll.skillBonus > 0 ? ` + Skill Bonus ${roll.skillBonus}` : '';
+  return `${attackerLabel} -> ${defenderLabel} | Attack Dice [${roll.attackRolls.join(',')}] = ${roll.totalAttackHits} | Defense Dice [${roll.defenseRolls.join(',')}] = ${roll.totalBlockedHits} Blocked Hits | Effective Hits ${roll.effectiveHits} | Weapon Damage ${roll.weaponDamage}${bonus} | Final Damage ${roll.finalDamage}${defenderDefeated ? ' | defeated' : ''}`;
 }

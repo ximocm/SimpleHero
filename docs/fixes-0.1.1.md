@@ -48,13 +48,13 @@ The focus of this patch should be usability and fairness:
   - The button should still exist as a discoverable command and for keyboard focus.
 
 ### Dice Readability and Combat Timing
-- [ ] Explain dice rolls in the combat UI.
+- [x] Explain dice rolls in the combat UI.
   - Show attack dice, defense/mitigation dice if any, modifiers, and final damage in a compact combat log line.
   - Use consistent terms from `docs/balance.md`.
-- [ ] Delay HP/token damage updates until dice animation resolves.
+- [x] Delay HP/token damage updates until dice animation resolves.
   - Dice animation, roll result, damage application, and token feedback should happen in that order.
   - Avoid showing final damage before the player sees why it happened.
-- [ ] Add a short final-result state after dice resolve.
+- [x] Add a short final-result state after dice resolve.
   - The player should have enough time to connect roll result with HP loss before the next automatic step.
 
 ### Board Visibility

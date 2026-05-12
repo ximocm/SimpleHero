@@ -1282,5 +1282,6 @@ function formatCombatLogEntry(
   roll: CombatRollSnapshot,
   defenderDefeated: boolean,
 ): string {
-  return `${attackerLabel} -> ${defenderLabel} | atk [${roll.attackRolls.join(',')}] def [${roll.defenseRolls.join(',')}] dmg ${roll.finalDamage}${defenderDefeated ? ' | defeated' : ''}`;
+  const bonus = roll.skillBonus > 0 ? ` + Skill Bonus ${roll.skillBonus}` : '';
+  return `${attackerLabel} -> ${defenderLabel} | Attack Dice [${roll.attackRolls.join(',')}] = ${roll.totalAttackHits} | Defense Dice [${roll.defenseRolls.join(',')}] = ${roll.totalBlockedHits} Blocked Hits | Effective Hits ${roll.effectiveHits} | Weapon Damage ${roll.weaponDamage}${bonus} | Final Damage ${roll.finalDamage}${defenderDefeated ? ' | defeated' : ''}`;
 }

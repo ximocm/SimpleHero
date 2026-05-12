@@ -26,7 +26,7 @@ export interface CampaignProfile {
   stash: InventoryEntry[];
 }
 
-export const COMBAT_ROLL_ANIMATION_TOTAL_MS = 3600;
+export const COMBAT_ROLL_ANIMATION_TOTAL_MS = 4400;
 
 export interface CombatRollAnimationState {
   roll: CombatRollSnapshot;

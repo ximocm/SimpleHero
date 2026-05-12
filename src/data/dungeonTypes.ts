@@ -99,6 +99,8 @@ export interface CombatRollSnapshot {
   totalAttackHits: number;
   totalBlockedHits: number;
   effectiveHits: number;
+  weaponDamage: number;
+  skillBonus: number;
   finalDamage: number;
 }
 

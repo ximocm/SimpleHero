@@ -40,9 +40,9 @@ export function performHeroAttack(state: GameState, hero: HeroState, enemy: Enem
     hero.id,
     enemy.id,
     weapon.attackDice,
-    weapon.damage + damageBonus,
+    weapon.damage,
     getEnemyDefenseDiceBonus(enemy),
-    { baseDefenseDice: 0 },
+    { baseDefenseDice: 0, skillBonus: damageBonus },
   );
 
   enemy.hp = Math.max(0, enemy.hp - roll.finalDamage);
@@ -171,6 +171,7 @@ function resolveAttack(
   defenseDiceBonus: number,
   options?: {
     baseDefenseDice?: number;
+    skillBonus?: number;
   },
 ): CombatRollSnapshot {
   const attackRolls = Array.from({ length: attackDice }, () => rollD6(state));
@@ -183,7 +184,7 @@ function resolveAttack(
   const totalBlockedHits = blockedHits.reduce((sum, value) => sum + value, 0);
   const effectiveHits = Math.max(0, totalAttackHits - totalBlockedHits);
   const hero = state.party.heroes.find((candidate) => candidate.id === attackerId);
-  const skillBonus = hero ? hero.skillEffects.powerStrikeDamageBonus : 0;
+  const skillBonus = options?.skillBonus ?? (hero ? hero.skillEffects.powerStrikeDamageBonus : 0);
   const finalDamage = effectiveHits === 0 ? 0 : weaponDamage + (effectiveHits - 1) + skillBonus;
 
   return {
@@ -196,6 +197,8 @@ function resolveAttack(
     totalAttackHits,
     totalBlockedHits,
     effectiveHits,
+    weaponDamage,
+    skillBonus,
     finalDamage,
   };
 }

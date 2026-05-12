@@ -113,7 +113,7 @@ export function renderPartyInventoryHtml(
           style="display:flex; align-items:center; gap:10px; font-size:14px; cursor:grab;"
         >
           <img
-            src="/${entry.file}"
+            src="${resolveAssetUrl(entry.file)}"
             alt="${entry.name}"
             width="34"
             height="34"
@@ -155,7 +155,7 @@ function renderEquipSlot(
     : 'style="display:inline-block;"';
   const slotContent =
     itemId && item
-      ? `<img src="/${item.file}" alt="${item.name}" width="22" height="22" title="${escapeAttr(
+      ? `<img src="${resolveAssetUrl(item.file)}" alt="${item.name}" width="22" height="22" title="${escapeAttr(
           getItemTooltip(itemId),
         )}" draggable="false" style="image-rendering:pixelated; border:1px solid rgba(148,163,184,0.35); background:rgba(148,163,184,0.14);" />`
       : `<span style="font-size:11px; color:#64748b;">-</span>`;
@@ -193,9 +193,9 @@ function renderBackpackItems(
         getItemTooltip(itemId),
       )}" data-backpack-item-id="${itemId}" style="display:inline-block; margin-right:6px; cursor:${
         isTargetable ? 'pointer' : 'grab'
-      };"><img src="/${
-        item.file
-      }" alt="${item.name}" width="20" height="20" draggable="false" style="image-rendering:pixelated; border:1px solid ${
+      };"><img src="${resolveAssetUrl(
+        item.file,
+      )}" alt="${item.name}" width="20" height="20" draggable="false" style="image-rendering:pixelated; border:1px solid ${
         isTargetable ? 'rgba(74,222,128,0.9)' : 'rgba(148,163,184,0.35)'
       }; background:${isTargetable ? 'rgba(20,83,45,0.45)' : 'rgba(148,163,184,0.14)'};" /></span>`;
     })
@@ -209,4 +209,8 @@ function escapeAttr(value: string): string {
     .replace(/'/g, '&#39;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function resolveAssetUrl(path: string): string {
+  return new URL(`../../${path}`, import.meta.url).toString();
 }

@@ -966,20 +966,24 @@ function drawDiceRow(
       ? args.rolls[index]
       : ((Math.floor(args.nowMs / 65) + index * 2) % 6) + 1;
     const resolvedValue = args.resolvedValues[index] ?? 0;
+    const didSucceed = resolvedValue > 0;
+    const settledFill = didSucceed ? 'rgba(20, 83, 45, 0.9)' : 'rgba(127, 29, 29, 0.9)';
+    const settledStroke = didSucceed ? '#22c55e' : '#ef4444';
+    const settledText = didSucceed ? '#dcfce7' : '#fee2e2';
 
-    ctx.fillStyle = isSettled ? 'rgba(15, 23, 42, 0.9)' : 'rgba(30, 41, 59, 0.88)';
+    ctx.fillStyle = isSettled ? settledFill : 'rgba(30, 41, 59, 0.88)';
     ctx.fillRect(dieX, args.y, dieSize, dieSize);
-    ctx.strokeStyle = isSettled ? args.color : 'rgba(148, 163, 184, 0.45)';
+    ctx.strokeStyle = isSettled ? settledStroke : 'rgba(148, 163, 184, 0.45)';
     ctx.lineWidth = isSettled ? 2 : 1.5;
     ctx.strokeRect(dieX + 0.5, args.y + 0.5, dieSize - 1, dieSize - 1);
 
-    ctx.fillStyle = '#f8fafc';
+    ctx.fillStyle = isSettled ? settledText : '#f8fafc';
     ctx.font = `bold ${Math.max(22, Math.floor(dieSize * 0.5))}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(String(displayValue), dieX + dieSize / 2, args.y + dieSize / 2 + 1);
 
     if (isSettled && args.showResolvedLabels !== false) {
-      ctx.fillStyle = resolvedValue > 0 ? '#fbbf24' : '#64748b';
+      ctx.fillStyle = didSucceed ? '#bbf7d0' : '#fecaca';
       ctx.font = `${Math.max(11, Math.floor(dieSize * 0.22))}px sans-serif`;
       ctx.fillText(`${args.resolvedLabelPrefix} ${resolvedValue}`, dieX + dieSize / 2, args.y + dieSize + Math.max(14, Math.floor(dieSize * 0.32)));
     }

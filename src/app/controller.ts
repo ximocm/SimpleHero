@@ -8,6 +8,7 @@ import {
   commitMoveFromHover,
   createGameState,
   ensureActiveHeroIsLiving,
+  explainInvalidBasicAttackAtTile,
   getCurrentRoom,
   getCurrentRoomEnemies,
   getTileAt,
@@ -804,6 +805,11 @@ export class AppController {
 
       if (!inBounds(target, room.width, room.height) || this.state.runState !== 'active') return;
       if (tryHeroAttackAtTile(this.state, target) || tryHeroCastSpellAtTile(this.state, target)) {
+        this.persistAll();
+        this.renderAll();
+        return;
+      }
+      if (explainInvalidBasicAttackAtTile(this.state, target)) {
         this.persistAll();
         this.renderAll();
         return;

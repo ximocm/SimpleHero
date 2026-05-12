@@ -41,7 +41,7 @@ The focus of this patch should be usability and fairness:
   - Show bindings in button tooltips or compact labels.
 
 ### Default Combat Interaction
-- [ ] Make enemy click perform basic attack by default when valid.
+- [x] Make enemy click perform basic attack by default when valid.
   - If the selected hero can basic attack the clicked enemy, execute it without requiring the `Basic Attack` button first.
   - If the attack is invalid, show the existing reason/disabled state instead of silently doing nothing.
 - [x] Keep explicit `Basic Attack` action available for clarity.

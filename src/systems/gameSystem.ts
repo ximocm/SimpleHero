@@ -632,6 +632,7 @@ export function getCurrentRoomEnemies(state: GameState): EnemyState[] {
 export function getCurrentRoomEnemyViews(state: GameState): EnemyBoardView[] {
   const hero = getActiveHero(state.party);
   const attackHeroId = state.attackModeHeroId;
+  const canDefaultBasicAttack = canUseDefaultBasicAttackInteraction(state);
   return getCurrentRoomEnemies(state).map((enemy) => ({
     id: enemy.id,
     kind: enemy.kind,
@@ -640,7 +641,7 @@ export function getCurrentRoomEnemyViews(state: GameState): EnemyBoardView[] {
     maxHp: enemy.maxHp,
     isAttackTargetable:
       enemy.hp > 0 &&
-      attackHeroId === hero.id &&
+      (attackHeroId === hero.id || canDefaultBasicAttack) &&
       canHeroBasicAttackEnemy(state, hero.id, enemy.id),
     isSpellTargetable: enemy.hp > 0 && isEnemySpellTargetable(state, hero.id, enemy.id),
   }));
@@ -679,7 +680,8 @@ export function toggleAttackMode(state: GameState): boolean {
 export function tryHeroAttackAtTile(state: GameState, target: Coord): boolean {
   if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
-  if (state.attackModeHeroId !== hero.id) return false;
+  const isExplicitAttackMode = state.attackModeHeroId === hero.id;
+  if (!isExplicitAttackMode && !canUseDefaultBasicAttackInteraction(state)) return false;
 
   const enemy = getCurrentRoomEnemies(state).find((candidate) => candidate.hp > 0 && sameCoord(candidate.tile, target));
   if (!enemy) return false;
@@ -704,6 +706,44 @@ export function tryHeroAttackAtTile(state: GameState, target: Coord): boolean {
   state.movingPath = [];
   syncCombatTurnState(state);
   return true;
+}
+
+export function explainInvalidBasicAttackAtTile(state: GameState, target: Coord): boolean {
+  if (state.runState !== 'active') return false;
+  const hero = getActiveHero(state.party);
+  const isExplicitAttackMode = state.attackModeHeroId === hero.id;
+  if (!isExplicitAttackMode && !canUseDefaultBasicAttackInteraction(state)) return false;
+
+  const enemy = getCurrentRoomEnemies(state).find((candidate) => candidate.hp > 0 && sameCoord(candidate.tile, target));
+  if (!enemy) return false;
+
+  const resources = state.turn?.heroResourcesById[hero.id];
+  const reason =
+    state.turn && !resources?.attackSlotAvailable
+      ? 'basic attack already spent'
+      : manhattanDistance(hero.tile, enemy.tile) > getHeroAttackRange(hero)
+        ? 'target out of range'
+        : !canHeroActNow(state, hero.id)
+          ? 'hero cannot act now'
+          : 'basic attack unavailable';
+
+  state.recentCombatLog.unshift(`Cannot attack ${enemy.kind}: ${reason}`);
+  state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  return true;
+}
+
+function canUseDefaultBasicAttackInteraction(state: GameState): boolean {
+  const hero = getActiveHero(state.party);
+  return (
+    state.runState === 'active' &&
+    canHeroActNow(state, hero.id) &&
+    state.attackModeHeroId === null &&
+    state.castModeHeroId === null &&
+    state.skillModeHeroId === null &&
+    state.selectedSpellId === null &&
+    state.selectedSkillId === null &&
+    state.itemUseModeHeroId === null
+  );
 }
 
 /**

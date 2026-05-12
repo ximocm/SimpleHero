@@ -376,7 +376,7 @@ function findExitDirection(room: RoomData, tile: Coord): Direction | null {
 }
 
 /**
- * Transitions party to next room when all heroes are ready on same exit.
+ * Transitions party to next room when any living hero reaches a valid exit.
  * @param state Game state to mutate.
  * @returns Nothing.
  */
@@ -387,13 +387,11 @@ function maybeTransitionRoom(state: GameState): void {
     return;
   }
 
-  const livingHeroes = state.party.heroes.filter((hero) => hero.hp > 0);
-  if (livingHeroes.length === 0) return;
-  if (!livingHeroes.every((hero) => state.readyByHeroId.has(hero.id))) return;
+  const transitioningHero = state.party.heroes.find((hero) => hero.hp > 0 && state.readyByHeroId.has(hero.id));
+  if (!transitioningHero) return;
 
-  const directions = Array.from(state.readyByHeroId.values());
-  const direction = directions[0];
-  if (!directions.every((d) => d === direction)) return;
+  const direction = state.readyByHeroId.get(transitioningHero.id);
+  if (!direction) return;
 
   const nextCoord = moveRoomCoord(current.coord, direction);
   const nextRoom = getRoomAt(state.dungeon, nextCoord);
@@ -409,7 +407,10 @@ function maybeTransitionRoom(state: GameState): void {
   if (!entry) {
     throw new Error(`Room ${nextRoom.id} is missing entry exit ${opposite}.`);
   }
-  const startTiles = getClosestWalkableTiles(nextRoom, entry, 3);
+  const blockedTiles = (state.dungeon.enemiesByRoomId.get(nextRoom.id) ?? [])
+    .filter((enemy) => enemy.hp > 0)
+    .map((enemy) => enemy.tile);
+  const startTiles = getClosestAvailableWalkableTiles(nextRoom, entry, state.party.heroes.length, blockedTiles);
 
   state.party.heroes.forEach((hero, index) => {
     hero.roomId = nextRoom.id;
@@ -431,6 +432,39 @@ function maybeTransitionRoom(state: GameState): void {
       state.recentCombatLog = state.recentCombatLog.slice(0, 6);
     }
   }
+}
+
+function getClosestAvailableWalkableTiles(
+  room: RoomData,
+  origin: Coord,
+  count: number,
+  blockedTiles: readonly Coord[],
+): Coord[] {
+  const walkable: Coord[] = [];
+
+  for (let y = 0; y < room.height; y += 1) {
+    for (let x = 0; x < room.width; x += 1) {
+      const coord = { x, y };
+      if (!canWalkTile(room, coord)) continue;
+      if (blockedTiles.some((blocked) => sameCoord(blocked, coord))) continue;
+      walkable.push(coord);
+    }
+  }
+
+  walkable.sort((a, b) => {
+    const da = manhattanDistance(a, origin);
+    const db = manhattanDistance(b, origin);
+    if (da !== db) return da - db;
+    if (a.y !== b.y) return a.y - b.y;
+    return a.x - b.x;
+  });
+
+  const selected = walkable.slice(0, count);
+  if (selected.length < count) {
+    throw new Error(`Room ${room.id} does not contain ${count} unoccupied walkable entry tiles.`);
+  }
+
+  return selected;
 }
 
 function maybeCollectTreasureReward(state: GameState, room: RoomData): void {

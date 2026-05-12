@@ -65,12 +65,12 @@ The focus of this patch should be usability and fairness:
   - Prefer compact overlays that are stable during movement and dice animations.
 
 ### Door and Room Entry Fairness
-- [ ] Remove the requirement that every hero must stand on the door tile.
+- [x] Remove the requirement that every hero must stand on the door tile.
   - Replace it with a clearer room-transition rule, such as party-ready confirmation, adjacency, or reaching the doorway with one hero.
-- [ ] Prevent unfair stacking on the door.
+- [x] Prevent unfair stacking on the door.
   - Preserve party order or place heroes into valid entry tiles deterministically.
   - Never reverse order accidentally when entering a room.
-- [ ] Add entry placement rules for blocked or occupied tiles.
+- [x] Add entry placement rules for blocked or occupied tiles.
   - Use nearest valid tile search when preferred entry positions are unavailable.
   - Make failures explicit if no valid placement exists.
 

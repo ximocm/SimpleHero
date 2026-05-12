@@ -507,6 +507,7 @@ function getReachableEnemyTiles(
         reachable.push(coord);
         continue;
       }
+      if (!isEnemyDestinationOpen(state, roomId, coord, enemy.id)) continue;
 
       const path = findPathAStar(enemy.tile, coord, (candidate) =>
         canEnemyPathThrough(state, roomId, candidate, coord, enemy.id),
@@ -541,7 +542,28 @@ function canEnemyPathThrough(
   const room = state.dungeon.rooms.get(roomId);
   if (!room) return false;
   if (!isWalkableCoord(room, coord)) return false;
-  if (sameCoord(coord, targetTile)) return true;
+
+  const enemyOccupied = (state.dungeon.enemiesByRoomId.get(roomId) ?? []).some(
+    (enemy) => enemy.id !== movingEnemyId && enemy.hp > 0 && sameCoord(enemy.tile, coord),
+  );
+  if (enemyOccupied) return false;
+
+  const heroOccupied = state.party.heroes.some(
+    (hero) => hero.roomId === roomId && hero.hp > 0 && sameCoord(hero.tile, coord),
+  );
+  if (heroOccupied) return sameCoord(coord, targetTile);
+
+  return true;
+}
+
+function isEnemyDestinationOpen(
+  state: GameState,
+  roomId: string,
+  coord: Coord,
+  movingEnemyId: string,
+): boolean {
+  const room = state.dungeon.rooms.get(roomId);
+  if (!room || !isWalkableCoord(room, coord)) return false;
 
   const heroOccupied = state.party.heroes.some(
     (hero) => hero.roomId === roomId && hero.hp > 0 && sameCoord(hero.tile, coord),

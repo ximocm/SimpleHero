@@ -89,6 +89,14 @@ export interface CombatTurnState {
   activeEnemyIndex: number;
 }
 
+export interface PendingRoomEntryState {
+  roomId: string;
+  entryTile: Coord;
+  allowedTiles: Coord[];
+  heroOrder: string[];
+  placementsByHeroId: Record<string, Coord | null>;
+}
+
 export interface CombatRollSnapshot {
   attackerId: string;
   defenderId: string;

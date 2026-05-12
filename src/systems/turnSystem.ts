@@ -32,6 +32,17 @@ export interface TurnBannerView {
  * @returns Nothing.
  */
 export function syncCombatTurnState(state: GameState): void {
+  if (state.pendingRoomEntry) {
+    state.turn = null;
+    state.turnAutomationReadyAt = null;
+    state.attackModeHeroId = null;
+    state.castModeHeroId = null;
+    state.skillModeHeroId = null;
+    state.selectedSpellId = null;
+    state.selectedSkillId = null;
+    return;
+  }
+
   if (state.runState !== 'active') {
     state.turn = null;
     state.turnAutomationReadyAt = null;

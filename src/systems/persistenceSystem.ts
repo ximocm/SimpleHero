@@ -7,6 +7,7 @@ import type {
   HeroClassName,
   HeroRaceName,
   HeroState,
+  PendingRoomEntryState,
   RoomData,
   RoomEncounterState,
   RoomProgressState,
@@ -141,6 +142,7 @@ interface PersistedGameStateV8 {
   runState: RunState;
   runGold: number;
   accountGoldApplied: boolean;
+  pendingRoomEntry?: PendingRoomEntryState | null;
 }
 
 type PersistedSnapshot =
@@ -244,6 +246,20 @@ export function persistGameState(state: GameState): void {
     runState: state.runState,
     runGold: state.runGold,
     accountGoldApplied: state.accountGoldApplied,
+    pendingRoomEntry: state.pendingRoomEntry
+      ? {
+          ...state.pendingRoomEntry,
+          entryTile: { ...state.pendingRoomEntry.entryTile },
+          allowedTiles: state.pendingRoomEntry.allowedTiles.map((tile) => ({ ...tile })),
+          heroOrder: [...state.pendingRoomEntry.heroOrder],
+          placementsByHeroId: Object.fromEntries(
+            Object.entries(state.pendingRoomEntry.placementsByHeroId).map(([heroId, tile]) => [
+              heroId,
+              tile ? { ...tile } : null,
+            ]),
+          ),
+        }
+      : null,
   };
 
   localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
@@ -450,9 +466,47 @@ function restoreFromSnapshot(snapshot: PersistedSnapshot): GameState | null {
   state.runState = sanitizeRunState('runState' in snapshot ? snapshot.runState : 'active');
   state.runGold = 'runGold' in snapshot ? Math.max(0, toInt(snapshot.runGold, 0)) : 0;
   state.accountGoldApplied = 'accountGoldApplied' in snapshot ? Boolean(snapshot.accountGoldApplied) : false;
+  state.pendingRoomEntry =
+    'pendingRoomEntry' in snapshot ? sanitizePendingRoomEntry(snapshot.pendingRoomEntry, state) : null;
   syncCombatTurnState(state);
 
   return state;
+}
+
+function sanitizePendingRoomEntry(value: PendingRoomEntryState | null | undefined, state: GameState): PendingRoomEntryState | null {
+  if (!value || typeof value !== 'object') return null;
+  const room = state.dungeon.rooms.get(value.roomId);
+  if (!room) return null;
+  const heroIds = new Set(state.party.heroes.map((hero) => hero.id));
+  const heroOrder = Array.isArray(value.heroOrder)
+    ? value.heroOrder.filter((heroId): heroId is string => typeof heroId === 'string' && heroIds.has(heroId))
+    : [];
+  if (heroOrder.length === 0) return null;
+
+  const entryTile = sanitizeHeroTile(value.entryTile, room, { x: 0, y: 0 });
+  const allowedTiles = Array.isArray(value.allowedTiles)
+    ? value.allowedTiles
+        .filter((tile) => tile && inBounds(tile, room.width, room.height) && isWalkable(room.tiles[tile.y][tile.x] as TileType))
+        .map((tile) => ({ x: tile.x | 0, y: tile.y | 0 }))
+    : [];
+  if (allowedTiles.length === 0) return null;
+
+  const placementsByHeroId: Record<string, Coord | null> = {};
+  for (const heroId of heroOrder) {
+    const placement = value.placementsByHeroId?.[heroId];
+    placementsByHeroId[heroId] =
+      placement && allowedTiles.some((tile) => tile.x === placement.x && tile.y === placement.y)
+        ? { x: placement.x | 0, y: placement.y | 0 }
+        : null;
+  }
+
+  return {
+    roomId: value.roomId,
+    entryTile,
+    allowedTiles,
+    heroOrder,
+    placementsByHeroId,
+  };
 }
 
 function sanitizeHeroTile(tile: Coord, room: RoomData | undefined, fallback: Coord): Coord {

@@ -29,6 +29,10 @@ export function getAppLayoutHtml(canvasWidth: number, canvasHeight: number): str
           style="display:flex; flex-direction:column; gap:6px; padding:14px; overflow:auto; max-height:340px;"
         ></div>
       </div>
+      <div
+        id="roomEntryModal"
+        style="display:none; position:absolute; inset:0; z-index:16; align-items:center; justify-content:center; background:rgba(2,6,23,0.72);"
+      ></div>
       <div id="gameRoot" style="display:flex; gap:18px; align-items:flex-start; width:100%;">
         <div id="characterPanels" style="display:flex; flex-direction:column; gap:10px; width:380px; flex:0 0 380px;"></div>
         <div style="flex:1 1 auto; display:flex; justify-content:center;">

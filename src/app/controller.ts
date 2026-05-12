@@ -5,7 +5,10 @@ import {
   canHeroCastSpellOnEnemy,
   canWalkTile,
   cancelCastMode,
+  assignPendingRoomEntryPlacement,
+  clearPendingRoomEntryPlacement,
   commitMoveFromHover,
+  completePendingRoomEntry,
   createGameState,
   ensureActiveHeroIsLiving,
   explainInvalidBasicAttackAtTile,
@@ -107,6 +110,7 @@ export class AppController {
       gameRoot: requireElement<HTMLDivElement>('#gameRoot'),
       screenOverlay: requireElement<HTMLDivElement>('#screenOverlay'),
       inventoryModal: requireElement<HTMLDivElement>('#inventoryModal'),
+      roomEntryModal: requireElement<HTMLDivElement>('#roomEntryModal'),
       inventoryModalGold: requireElement<HTMLDivElement>('#inventoryModalGold'),
       inventoryModalList: requireElement<HTMLDivElement>('#inventoryModalList'),
       status: requireElement<HTMLDivElement>('#status'),
@@ -150,7 +154,7 @@ export class AppController {
   }
 
   private isGameplayMode(): boolean {
-    return this.appMode === 'game' && this.overlayMode === null;
+    return this.appMode === 'game' && this.overlayMode === null && this.state.pendingRoomEntry === null;
   }
 
   private renderAll(): void {
@@ -175,6 +179,106 @@ export class AppController {
     renderCombatLog(this.state, { combatLog: this.refs.combatLog });
     renderCastMenu(this.state, { castMenu: this.refs.castMenu });
     this.syncInventoryModalVisibility();
+    this.renderRoomEntryModal();
+  }
+
+  private renderRoomEntryModal(): void {
+    const pending = this.state.pendingRoomEntry;
+    if (this.appMode !== 'game' || !pending) {
+      this.refs.roomEntryModal.style.display = 'none';
+      this.refs.roomEntryModal.innerHTML = '';
+      return;
+    }
+
+    const room = getCurrentRoom(this.state);
+    const allowed = new Set(pending.allowedTiles.map((tile) => `${tile.x},${tile.y}`));
+    const placements = new Map(
+      Object.entries(pending.placementsByHeroId)
+        .filter((entry): entry is [string, Coord] => entry[1] !== null)
+        .map(([heroId, tile]) => [`${tile.x},${tile.y}`, heroId]),
+    );
+    const placedHeroIds = new Set(Object.keys(pending.placementsByHeroId).filter((heroId) => pending.placementsByHeroId[heroId]));
+    const heroesById = new Map(this.state.party.heroes.map((hero) => [hero.id, hero]));
+    const allPlaced = pending.heroOrder.every((heroId) => pending.placementsByHeroId[heroId]);
+
+    this.refs.roomEntryModal.style.display = 'flex';
+    this.refs.roomEntryModal.innerHTML = `
+      <div style="width:min(920px, calc(100vw - 48px)); max-height:calc(100vh - 48px); overflow:auto; border:1px solid rgba(148,163,184,0.34); background:rgba(2,6,23,0.96); box-shadow:0 18px 52px rgba(2,6,23,0.62); padding:18px;">
+        <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:14px;">
+          <div>
+            <div style="font-size:18px; color:#f8fafc;">Room entry</div>
+            <div style="font-size:12px; color:#94a3b8; margin-top:4px;">Place the party within 3 tiles of the entrance before combat starts.</div>
+          </div>
+          <button
+            data-entry-action="confirm"
+            type="button"
+            ${allPlaced ? '' : 'disabled'}
+            style="padding:9px 12px; border:1px solid ${allPlaced ? 'rgba(74,222,128,0.5)' : 'rgba(71,85,105,0.5)'}; background:${allPlaced ? 'rgba(20,83,45,0.5)' : 'rgba(15,23,42,0.7)'}; color:${allPlaced ? '#dcfce7' : '#64748b'}; cursor:${allPlaced ? 'pointer' : 'default'};"
+          >
+            start room
+          </button>
+        </div>
+        <div style="display:grid; grid-template-columns:minmax(220px, 0.72fr) minmax(360px, 1fr); gap:18px; align-items:start;">
+          <div style="border:1px solid rgba(148,163,184,0.2); background:rgba(15,23,42,0.54); padding:12px;">
+            <div style="font-size:12px; color:#94a3b8; margin-bottom:10px;">Drag heroes</div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              ${pending.heroOrder
+                .map((heroId, orderIndex) => {
+                  const hero = heroesById.get(heroId);
+                  if (!hero) return '';
+                  const isPlaced = placedHeroIds.has(heroId);
+                  const tile = pending.placementsByHeroId[heroId];
+                  return `
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div
+                        data-entry-hero-id="${escapeAttr(heroId)}"
+                        draggable="true"
+                        style="width:34px; height:34px; border-radius:999px; display:flex; align-items:center; justify-content:center; border:2px solid ${orderIndex === 0 ? '#fbbf24' : 'rgba(226,232,240,0.7)'}; background:${isPlaced ? 'rgba(20,83,45,0.72)' : 'rgba(30,41,59,0.86)'}; color:#f8fafc; font-weight:700; cursor:grab;"
+                      >${hero.classLetter}</div>
+                      <div style="min-width:0; flex:1;">
+                        <div style="font-size:13px; color:#f8fafc;">${escapeHtml(hero.name)}</div>
+                        <div style="font-size:11px; color:#94a3b8;">${hero.className}${tile ? ` · ${tile.x},${tile.y}` : ''}</div>
+                      </div>
+                      ${isPlaced ? `<button data-entry-action="clear" data-entry-hero-id="${escapeAttr(heroId)}" type="button" style="padding:5px 7px; border:1px solid rgba(148,163,184,0.28); background:rgba(30,41,59,0.72); color:#cbd5e1; cursor:pointer;">clear</button>` : ''}
+                    </div>
+                  `;
+                })
+                .join('')}
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(${room.width}, 42px); gap:4px; justify-content:center;">
+            ${room.tiles
+              .map((row, y) =>
+                row
+                  .map((tileType, x) => {
+                    const key = `${x},${y}`;
+                    const isAllowed = allowed.has(key);
+                    const placedHeroId = placements.get(key);
+                    const placedHero = placedHeroId ? heroesById.get(placedHeroId) : null;
+                    const isEntry = x === pending.entryTile.x && y === pending.entryTile.y;
+                    const isVoid = tileType === TileType.VOID_BLACK;
+                    return `
+                      <div
+                        ${isAllowed ? `data-entry-tile="true" data-entry-x="${x}" data-entry-y="${y}"` : ''}
+                        style="width:42px; height:42px; box-sizing:border-box; display:flex; align-items:center; justify-content:center; border:1px solid ${isEntry ? '#fbbf24' : isAllowed ? 'rgba(74,222,128,0.45)' : 'rgba(51,65,85,0.6)'}; background:${isVoid ? 'rgba(2,6,23,0.72)' : isAllowed ? 'rgba(20,83,45,0.28)' : 'rgba(30,41,59,0.5)'};"
+                      >
+                        ${
+                          placedHero
+                            ? `<div data-entry-hero-id="${escapeAttr(placedHero.id)}" draggable="true" style="width:28px; height:28px; border-radius:999px; display:flex; align-items:center; justify-content:center; background:#fbbf24; color:#0f172a; font-weight:800; cursor:grab;">${placedHero.classLetter}</div>`
+                            : isEntry
+                              ? `<span style="font-size:10px; color:#fef3c7;">IN</span>`
+                              : ''
+                        }
+                      </div>
+                    `;
+                  })
+                  .join(''),
+              )
+              .join('')}
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   private renderAppMode(): void {
@@ -273,6 +377,7 @@ export class AppController {
     this.bindPanelEvents();
     this.bindInventoryEvents();
     this.bindActionButtons();
+    this.bindRoomEntryModalEvents();
     this.bindOverlayEvents();
     this.bindCanvasEvents();
     this.bindKeyboardEvents();
@@ -415,6 +520,57 @@ export class AppController {
       this.inventoryController.addInventory(payload.itemId);
       this.persistAll();
       this.renderAll();
+    });
+  }
+
+  private bindRoomEntryModalEvents(): void {
+    this.refs.roomEntryModal.addEventListener('dragstart', (event) => {
+      const target = event.target as HTMLElement | null;
+      const heroId = target?.closest<HTMLElement>('[data-entry-hero-id]')?.dataset.entryHeroId;
+      if (!heroId) return;
+      event.dataTransfer?.setData('application/x-simplehero-entry-hero', heroId);
+      event.dataTransfer?.setData('text/plain', heroId);
+    });
+
+    this.refs.roomEntryModal.addEventListener('dragover', (event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest<HTMLElement>('[data-entry-tile]')) return;
+      event.preventDefault();
+    });
+
+    this.refs.roomEntryModal.addEventListener('drop', (event) => {
+      const target = event.target as HTMLElement | null;
+      const tile = target?.closest<HTMLElement>('[data-entry-tile]');
+      if (!tile) return;
+      event.preventDefault();
+      const heroId = event.dataTransfer?.getData('application/x-simplehero-entry-hero');
+      const x = Number(tile.dataset.entryX);
+      const y = Number(tile.dataset.entryY);
+      if (!heroId || !Number.isInteger(x) || !Number.isInteger(y)) return;
+      if (!assignPendingRoomEntryPlacement(this.state, heroId, { x, y })) return;
+      this.persistAll();
+      this.renderAll();
+    });
+
+    this.refs.roomEntryModal.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement | null;
+      const action = target?.closest<HTMLElement>('[data-entry-action]')?.dataset.entryAction;
+      if (!action) return;
+
+      if (action === 'clear') {
+        const heroId = target?.closest<HTMLElement>('[data-entry-hero-id]')?.dataset.entryHeroId;
+        if (!heroId) return;
+        clearPendingRoomEntryPlacement(this.state, heroId);
+        this.persistAll();
+        this.renderAll();
+        return;
+      }
+
+      if (action === 'confirm') {
+        if (!completePendingRoomEntry(this.state)) return;
+        this.persistAll();
+        this.renderAll();
+      }
     });
   }
 
@@ -843,7 +999,7 @@ export class AppController {
 
   private tick(): void {
     const now = performance.now();
-    if (this.appMode === 'game' && this.overlayMode === null) {
+    if (this.appMode === 'game' && this.overlayMode === null && this.state.pendingRoomEntry === null) {
       this.updateCombatRollAnimation(now);
       ensureActiveHeroIsLiving(this.state);
       const enemyAutomationBlocked = this.diceAnimation !== null && this.state.turn?.phase === 'enemies';
@@ -962,4 +1118,17 @@ export class AppController {
     const isVisible = this.appMode === 'game' && this.inventoryModalOpen;
     this.refs.inventoryModal.style.display = isVisible ? 'block' : 'none';
   }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeAttr(value: string): string {
+  return escapeHtml(value)
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

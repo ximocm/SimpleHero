@@ -54,6 +54,7 @@ export interface AppRenderRefs {
   gameRoot: HTMLDivElement;
   screenOverlay: HTMLDivElement;
   inventoryModal: HTMLDivElement;
+  roomEntryModal: HTMLDivElement;
   inventoryModalGold: HTMLDivElement;
   inventoryModalList: HTMLDivElement;
   status: HTMLDivElement;
@@ -258,6 +259,7 @@ export function drawFrame(args: FrameRenderArgs): void {
   }
 
   state.party.heroes.forEach((hero, index) => {
+    if (hero.roomId !== room.id) return;
     const displayHp = getDisplayedHpDuringCombatRoll(hero.id, hero.hp, hero.maxHp, args);
     if (displayHp <= 0) return;
     if (state.readyByHeroId.has(hero.id)) return;

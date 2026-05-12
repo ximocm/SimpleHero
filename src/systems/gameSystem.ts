@@ -7,6 +7,7 @@ import type {
   EnemyState,
   HeroState,
   PartyState,
+  PendingRoomEntryState,
   RoomData,
   RoomEncounterState,
   RoomType,
@@ -62,6 +63,7 @@ export interface GameState {
   readyByHeroId: Map<string, Direction>;
   turn: CombatTurnState | null;
   turnAutomationReadyAt: number | null;
+  pendingRoomEntry: PendingRoomEntryState | null;
   combatRngState: number;
   attackModeHeroId: string | null;
   castModeHeroId: string | null;
@@ -169,6 +171,7 @@ export function createGameState(seed: number, roster?: readonly HeroRosterEntry[
     readyByHeroId: new Map(),
     turn: null,
     turnAutomationReadyAt: null,
+    pendingRoomEntry: null,
     combatRngState: (seed ^ 0x9e3779b9) >>> 0,
     attackModeHeroId: null,
     castModeHeroId: null,
@@ -417,29 +420,30 @@ function maybeTransitionRoom(state: GameState, heroId: string): void {
   const blockedTiles = (state.dungeon.enemiesByRoomId.get(nextRoom.id) ?? [])
     .filter((enemy) => enemy.hp > 0)
     .map((enemy) => enemy.tile);
-  const startTiles = getClosestAvailableWalkableTiles(nextRoom, entry, state.party.heroes.length, blockedTiles);
+  const allowedTiles = getEntryPlacementTiles(nextRoom, entry, blockedTiles);
+  if (allowedTiles.length < state.party.heroes.length) {
+    throw new Error(`Room ${nextRoom.id} does not contain enough entry placement tiles near ${opposite}.`);
+  }
   const entryOrder = getPartyEntryOrder(state.party.heroes, transitioningHero.id);
-
-  entryOrder.forEach((hero, index) => {
-    hero.roomId = nextRoom.id;
-    hero.tile = { ...startTiles[index] };
-  });
 
   state.readyByHeroId.clear();
   state.hoverPath = [];
   state.movingPath = [];
-  syncCombatTurnState(state);
-  maybeCollectTreasureReward(state, nextRoom);
-  if (nextRoom.roomType === 'exit' && state.party.heroes.some((hero) => hero.hp > 0)) {
-    if (areAllRequiredRoomsCleared(state.dungeon)) {
-      setRunState(state, 'won');
-      state.recentCombatLog.unshift('Run complete: the party cleared every required room and reached the exit.');
-      state.recentCombatLog = state.recentCombatLog.slice(0, 6);
-    } else {
-      state.recentCombatLog.unshift('Exit sealed: clear every combat room and complete every treasure room before the run can be won.');
-      state.recentCombatLog = state.recentCombatLog.slice(0, 6);
-    }
-  }
+  state.turn = null;
+  state.turnAutomationReadyAt = null;
+  state.attackModeHeroId = null;
+  state.castModeHeroId = null;
+  state.skillModeHeroId = null;
+  state.selectedSpellId = null;
+  state.selectedSkillId = null;
+  state.itemUseModeHeroId = null;
+  state.pendingRoomEntry = {
+    roomId: nextRoom.id,
+    entryTile: { ...entry },
+    allowedTiles,
+    heroOrder: entryOrder.map((hero) => hero.id),
+    placementsByHeroId: Object.fromEntries(entryOrder.map((hero) => [hero.id, null])),
+  };
 }
 
 function getPartyEntryOrder(heroes: PartyState['heroes'], firstHeroId: string): PartyState['heroes'] {
@@ -448,17 +452,18 @@ function getPartyEntryOrder(heroes: PartyState['heroes'], firstHeroId: string): 
   return [...heroes.slice(firstIndex), ...heroes.slice(0, firstIndex)];
 }
 
-function getClosestAvailableWalkableTiles(
+function getEntryPlacementTiles(
   room: RoomData,
   origin: Coord,
-  count: number,
   blockedTiles: readonly Coord[],
 ): Coord[] {
+  const radius = 3;
   const walkable: Coord[] = [];
 
   for (let y = 0; y < room.height; y += 1) {
     for (let x = 0; x < room.width; x += 1) {
       const coord = { x, y };
+      if (manhattanDistance(coord, origin) > radius) continue;
       if (!canWalkTile(room, coord)) continue;
       if (blockedTiles.some((blocked) => sameCoord(blocked, coord))) continue;
       walkable.push(coord);
@@ -473,12 +478,70 @@ function getClosestAvailableWalkableTiles(
     return a.x - b.x;
   });
 
-  const selected = walkable.slice(0, count);
-  if (selected.length < count) {
-    throw new Error(`Room ${room.id} does not contain ${count} unoccupied walkable entry tiles.`);
+  return walkable;
+}
+
+export function assignPendingRoomEntryPlacement(state: GameState, heroId: string, tile: Coord): boolean {
+  const pending = state.pendingRoomEntry;
+  if (!pending) return false;
+  if (!pending.heroOrder.includes(heroId)) return false;
+  if (!pending.allowedTiles.some((allowed) => sameCoord(allowed, tile))) return false;
+
+  for (const [placedHeroId, placedTile] of Object.entries(pending.placementsByHeroId)) {
+    if (placedHeroId !== heroId && placedTile && sameCoord(placedTile, tile)) return false;
   }
 
-  return selected;
+  pending.placementsByHeroId[heroId] = { ...tile };
+  return true;
+}
+
+export function clearPendingRoomEntryPlacement(state: GameState, heroId: string): boolean {
+  const pending = state.pendingRoomEntry;
+  if (!pending || !pending.heroOrder.includes(heroId)) return false;
+  pending.placementsByHeroId[heroId] = null;
+  return true;
+}
+
+export function completePendingRoomEntry(state: GameState): boolean {
+  const pending = state.pendingRoomEntry;
+  if (!pending) return false;
+  const room = state.dungeon.rooms.get(pending.roomId);
+  if (!room) return false;
+
+  const placements = pending.heroOrder.map((heroId) => ({
+    heroId,
+    tile: pending.placementsByHeroId[heroId] ?? null,
+  }));
+  if (placements.some((entry) => entry.tile === null)) return false;
+
+  for (const { heroId, tile } of placements) {
+    const hero = state.party.heroes.find((candidate) => candidate.id === heroId);
+    if (!hero || !tile) continue;
+    hero.roomId = pending.roomId;
+    hero.tile = { ...tile };
+  }
+
+  const firstHeroId = pending.heroOrder[0];
+  const firstHeroIndex = state.party.heroes.findIndex((hero) => hero.id === firstHeroId);
+  if (firstHeroIndex >= 0) state.party.activeHeroIndex = firstHeroIndex;
+
+  state.pendingRoomEntry = null;
+  syncCombatTurnState(state);
+  maybeCollectTreasureReward(state, room);
+  maybeResolveExitRoom(state, room);
+  return true;
+}
+
+function maybeResolveExitRoom(state: GameState, room: RoomData): void {
+  if (room.roomType !== 'exit' || !state.party.heroes.some((hero) => hero.hp > 0)) return;
+  if (areAllRequiredRoomsCleared(state.dungeon)) {
+    setRunState(state, 'won');
+    state.recentCombatLog.unshift('Run complete: the party cleared every required room and reached the exit.');
+    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  } else {
+    state.recentCombatLog.unshift('Exit sealed: clear every combat room and complete every treasure room before the run can be won.');
+    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+  }
 }
 
 function maybeCollectTreasureReward(state: GameState, room: RoomData): void {

@@ -16,7 +16,7 @@ import { performEnemyAttack } from './combatSystem.js';
 
 const DEFAULT_ACTION_POINTS = 2;
 // Keep enemy actions readable during the automated enemy phase.
-const AUTOMATED_TURN_DELAY_MS = 850;
+const AUTOMATED_TURN_DELAY_MS = 1250;
 
 export interface TurnBannerView {
   isCombatActive: boolean;

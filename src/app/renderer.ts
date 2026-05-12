@@ -34,6 +34,18 @@ const COMBAT_ROLL_DEFENSE_MS = 900;
 const COMBAT_ROLL_DEFENSE_PAUSE_MS = 250;
 const COMBAT_ROLL_COMPARISON_MS = 450;
 const COMBAT_ROLL_DAMAGE_MS = 600;
+const ENEMY_MOVE_MS_PER_TILE = 420;
+const ENEMY_MOVE_MAX_MS = 1400;
+const enemyTokenAnimations = new Map<
+  string,
+  {
+    from: Coord;
+    to: Coord;
+    startedAt: number;
+    durationMs: number;
+    lastTile: Coord;
+  }
+>();
 
 export interface AppRenderRefs {
   canvas: HTMLCanvasElement;
@@ -278,14 +290,24 @@ export function drawFrame(args: FrameRenderArgs): void {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(hero.classLetter, cx, cy);
+    drawTokenHealthBadge(ctx, {
+      x: cx,
+      y: cy + radius + 10,
+      width: Math.max(32, tileSize * 0.62),
+      hp: hero.hp,
+      maxHp: hero.maxHp,
+      fill: '#22c55e',
+      text: '#dcfce7',
+    });
   });
 
   const roomEnemies = getCurrentRoomEnemyViews(state);
   roomEnemies.forEach((enemy) => {
     if (enemy.hp <= 0) return;
 
-    const cx = offset.x + enemy.tile.x * tileSize + tileSize / 2;
-    const cy = offset.y + enemy.tile.y * tileSize + tileSize / 2;
+    const renderTile = getAnimatedEnemyTile(enemy.id, enemy.tile, args.nowMs);
+    const cx = offset.x + renderTile.x * tileSize + tileSize / 2;
+    const cy = offset.y + renderTile.y * tileSize + tileSize / 2;
     const radius = tileSize * 0.26;
 
     ctx.fillStyle = enemy.kind === 'skeleton-archer' ? '#fb7185' : '#ef4444';
@@ -301,15 +323,81 @@ export function drawFrame(args: FrameRenderArgs): void {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(enemy.kind === 'skeleton-archer' ? 'A' : 'S', cx, cy);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `${Math.max(9, Math.floor(tileSize * 0.2))}px sans-serif`;
-    ctx.fillText(`${enemy.hp}/${enemy.maxHp}`, cx, cy + radius + 10);
+    drawTokenHealthBadge(ctx, {
+      x: cx,
+      y: cy + radius + 10,
+      width: Math.max(30, tileSize * 0.58),
+      hp: enemy.hp,
+      maxHp: enemy.maxHp,
+      fill: '#fb7185',
+      text: '#ffe4e6',
+    });
   });
 
   drawHud(args);
   drawMinimap(args, minimapCtx);
   drawCombatResultPanel(args);
+}
+
+function getAnimatedEnemyTile(enemyId: string, tile: Coord, nowMs: number): Coord {
+  const existing = enemyTokenAnimations.get(enemyId);
+  if (!existing) {
+    enemyTokenAnimations.set(enemyId, {
+      from: { ...tile },
+      to: { ...tile },
+      startedAt: nowMs,
+      durationMs: 0,
+      lastTile: { ...tile },
+    });
+    return tile;
+  }
+
+  if (!sameRenderTile(existing.lastTile, tile)) {
+    const distance = Math.abs(existing.lastTile.x - tile.x) + Math.abs(existing.lastTile.y - tile.y);
+    existing.from = { ...existing.lastTile };
+    existing.to = { ...tile };
+    existing.startedAt = nowMs;
+    existing.durationMs = Math.min(ENEMY_MOVE_MAX_MS, Math.max(ENEMY_MOVE_MS_PER_TILE, distance * ENEMY_MOVE_MS_PER_TILE));
+    existing.lastTile = { ...tile };
+  }
+
+  if (existing.durationMs <= 0) return tile;
+
+  const progress = Math.min(1, Math.max(0, (nowMs - existing.startedAt) / existing.durationMs));
+  const eased = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+  if (progress >= 1) return tile;
+
+  return {
+    x: existing.from.x + (existing.to.x - existing.from.x) * eased,
+    y: existing.from.y + (existing.to.y - existing.from.y) * eased,
+  };
+}
+
+function sameRenderTile(a: Coord, b: Coord): boolean {
+  return a.x === b.x && a.y === b.y;
+}
+
+function drawTokenHealthBadge(
+  ctx: CanvasRenderingContext2D,
+  args: { x: number; y: number; width: number; hp: number; maxHp: number; fill: string; text: string },
+): void {
+  const height = 13;
+  const left = args.x - args.width / 2;
+  const top = args.y - height / 2;
+  const percent = args.maxHp > 0 ? Math.max(0, Math.min(1, args.hp / args.maxHp)) : 0;
+
+  ctx.fillStyle = 'rgba(2,6,23,0.82)';
+  ctx.fillRect(left, top, args.width, height);
+  ctx.strokeStyle = 'rgba(15,23,42,0.9)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left + 0.5, top + 0.5, args.width - 1, height - 1);
+  ctx.fillStyle = args.fill;
+  ctx.fillRect(left + 2, top + 2, Math.max(0, (args.width - 4) * percent), height - 4);
+  ctx.fillStyle = args.text;
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${args.hp}/${args.maxHp}`, args.x, args.y + 0.5);
 }
 
 function drawTacticalPreviewOverlay(

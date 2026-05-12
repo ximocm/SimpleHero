@@ -58,10 +58,10 @@ The focus of this patch should be usability and fairness:
   - The player should have enough time to connect roll result with HP loss before the next automatic step.
 
 ### Board Visibility
-- [ ] Put team HP closer to the board.
+- [x] Put team HP closer to the board.
   - Add compact HP pips/bars near hero tokens, the board edge, or the active combat HUD.
   - The player should not need to scan the sidebar to know team health during combat.
-- [ ] Make per-token damage and current HP readable without cluttering the board.
+- [x] Make per-token damage and current HP readable without cluttering the board.
   - Prefer compact overlays that are stable during movement and dice animations.
 
 ### Door and Room Entry Fairness

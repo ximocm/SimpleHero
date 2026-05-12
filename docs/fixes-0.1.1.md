@@ -27,13 +27,13 @@ The focus of this patch should be usability and fairness:
 ## Issue Checklist
 
 ### Turn State and Action Economy
-- [ ] Show each hero's turn status directly in the board/HUD.
+- [x] Show each hero's turn status directly in the board/HUD.
   - Display at least: active hero, already acted heroes, and heroes still available this round.
   - Avoid relying only on the selected hero highlight.
-- [ ] Rename or restyle `Skip Turn` so its scope is unambiguous.
+- [x] Rename or restyle `Skip Turn` so its scope is unambiguous.
   - Decide whether it ends only the selected hero activation or the whole player phase.
   - Button label and disabled states must match that rule.
-- [ ] Show whether the selected hero has spent their basic attack.
+- [x] Show whether the selected hero has spent their basic attack.
   - Add a visible attack-slot indicator near AP/turn controls.
   - Make spent/unspent state readable without opening any extra panel.
 - [ ] Add keyboard bindings for core combat actions.
@@ -44,7 +44,7 @@ The focus of this patch should be usability and fairness:
 - [ ] Make enemy click perform basic attack by default when valid.
   - If the selected hero can basic attack the clicked enemy, execute it without requiring the `Basic Attack` button first.
   - If the attack is invalid, show the existing reason/disabled state instead of silently doing nothing.
-- [ ] Keep explicit `Basic Attack` action available for clarity.
+- [x] Keep explicit `Basic Attack` action available for clarity.
   - The button should still exist as a discoverable command and for keyboard focus.
 
 ### Dice Readability and Combat Timing

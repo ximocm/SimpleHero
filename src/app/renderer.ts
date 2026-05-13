@@ -18,7 +18,6 @@ import {
   isRoomObjectiveCleared,
   type GameState,
 } from '../systems/gameSystem.js';
-import { getFireballAreaTiles } from '../systems/combatSystem.js';
 import { getTurnBannerView, isCurrentTurnHero } from '../systems/turnSystem.js';
 import { getHeroAttackProfile, getHeroCastRequirementView } from '../systems/weaponSystem.js';
 import { getPauseMenuOverlayHtml, getRunCompleteOverlayHtml, getStartMenuOverlayHtml } from '../ui/overlayViews.js';
@@ -661,115 +660,6 @@ function drawHud(args: FrameRenderArgs): void {
   refs.skipTurnButton.textContent = 'end heroes phase';
 }
 
-function drawCombatRollOverlay(args: FrameRenderArgs): void {
-  const animation = args.diceAnimation;
-  if (!animation) return;
-
-  const elapsed = Math.max(0, args.nowMs - animation.startedAt);
-  if (elapsed >= COMBAT_ROLL_ANIMATION_TOTAL_MS) return;
-
-  const fadeIn = Math.min(1, elapsed / 120);
-  const fadeOut = Math.min(1, (COMBAT_ROLL_ANIMATION_TOTAL_MS - elapsed) / 220);
-  const alpha = Math.max(0, Math.min(fadeIn, fadeOut));
-  const sceneHeight = args.refs.canvas.height - args.hudHeight;
-  const panelWidth = Math.min(args.refs.canvas.width - 100, 820);
-  const panelHeight = Math.min(sceneHeight - 60, 360);
-  const panelX = Math.floor((args.refs.canvas.width - panelWidth) / 2);
-  const panelY = Math.floor((sceneHeight - panelHeight) / 2);
-  const title = `${animation.attackerLabel} attacks ${animation.defenderLabel}`;
-
-  const attackStart = COMBAT_ROLL_INTRO_MS;
-  const attackEnd = attackStart + COMBAT_ROLL_ATTACK_MS;
-  const defenseStart = attackEnd + COMBAT_ROLL_ATTACK_PAUSE_MS;
-  const defenseEnd = defenseStart + COMBAT_ROLL_DEFENSE_MS;
-  const comparisonStart = defenseEnd + COMBAT_ROLL_DEFENSE_PAUSE_MS;
-  const damageStart = comparisonStart + COMBAT_ROLL_COMPARISON_MS;
-
-  args.ctx.save();
-  args.ctx.globalAlpha = alpha;
-  args.ctx.fillStyle = '#020617';
-  args.ctx.fillRect(0, 0, args.refs.canvas.width, sceneHeight);
-  args.ctx.fillStyle = 'rgba(15, 23, 42, 0.96)';
-  args.ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
-  args.ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
-  args.ctx.lineWidth = 2;
-  args.ctx.strokeRect(panelX + 1, panelY + 1, panelWidth - 2, panelHeight - 2);
-
-  args.ctx.strokeStyle = 'rgba(59, 130, 246, 0.14)';
-  args.ctx.lineWidth = 1;
-  for (let ring = 0; ring < 4; ring += 1) {
-    const radius = 120 + ring * 70;
-    args.ctx.beginPath();
-    args.ctx.arc(panelX + panelWidth * 0.25, panelY + panelHeight * 0.5, radius, 0, Math.PI * 2);
-    args.ctx.stroke();
-    args.ctx.beginPath();
-    args.ctx.arc(panelX + panelWidth * 0.75, panelY + panelHeight * 0.5, radius, 0, Math.PI * 2);
-    args.ctx.stroke();
-  }
-
-  args.ctx.fillStyle = '#f8fafc';
-  args.ctx.font = 'bold 30px sans-serif';
-  args.ctx.textAlign = 'center';
-  args.ctx.textBaseline = 'top';
-  args.ctx.fillText(title, panelX + panelWidth / 2, panelY + 24);
-
-  args.ctx.fillStyle = '#94a3b8';
-  args.ctx.font = '16px sans-serif';
-  args.ctx.fillText(getCombatRollStageLabel(elapsed, defenseStart, comparisonStart, damageStart), panelX + panelWidth / 2, panelY + 64);
-
-  drawDiceRow(args.ctx, {
-    x: panelX + 40,
-    y: panelY + 118,
-    label: 'Attack',
-    rolls: animation.roll.attackRolls,
-    resolvedValues: animation.roll.attackHits,
-    color: '#f97316',
-    stageProgress: getStageProgress(elapsed, attackStart, COMBAT_ROLL_ATTACK_MS),
-    nowMs: args.nowMs,
-    resolvedLabelPrefix: 'hit',
-    dieSize: 60,
-  });
-
-  if (elapsed >= defenseStart - 120) {
-    drawDiceRow(args.ctx, {
-      x: panelX + 40,
-      y: panelY + 214,
-      label: 'Defense',
-      rolls: animation.roll.defenseRolls,
-      resolvedValues: animation.roll.blockedHits,
-      color: '#38bdf8',
-      stageProgress: getStageProgress(elapsed, defenseStart, COMBAT_ROLL_DEFENSE_MS),
-      nowMs: args.nowMs,
-      resolvedLabelPrefix: 'block',
-      dieSize: 60,
-    });
-  }
-
-  if (elapsed >= comparisonStart) {
-    drawComparisonRow(
-      args.ctx,
-      panelX + panelWidth - 286,
-      panelY + 124,
-      animation.roll.totalAttackHits,
-      animation.roll.totalBlockedHits,
-      animation.roll.effectiveHits,
-      Math.min(1, (elapsed - comparisonStart) / COMBAT_ROLL_COMPARISON_MS),
-    );
-  }
-
-  if (elapsed >= damageStart) {
-    drawDamageBadge(
-      args.ctx,
-      panelX + panelWidth - 286,
-      panelY + 234,
-      animation.roll.finalDamage,
-      Math.min(1, (elapsed - damageStart) / COMBAT_ROLL_DAMAGE_MS),
-    );
-  }
-
-  args.ctx.restore();
-}
-
 function drawMinimap(args: FrameRenderArgs, minimapCtx: CanvasRenderingContext2D): void {
   const { state, refs, showFullDungeonMap } = args;
   minimapCtx.clearRect(0, 0, refs.minimapCanvas.width, refs.minimapCanvas.height);
@@ -990,47 +880,6 @@ function drawDiceRow(
       ctx.fillText(`${args.resolvedLabelPrefix} ${resolvedValue}`, dieX + dieSize / 2, args.y + dieSize + Math.max(14, Math.floor(dieSize * 0.32)));
     }
   }
-}
-
-function drawComparisonRow(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  attackHits: number,
-  blockedHits: number,
-  effectiveHits: number,
-  progress: number,
-  boxWidth = 68,
-  gap = 10,
-): void {
-  const alpha = Math.max(0.2, progress);
-  const entries = [
-    { label: 'hits', value: attackHits, color: '#fb923c' },
-    { label: 'blocks', value: blockedHits, color: '#38bdf8' },
-    { label: 'net', value: effectiveHits, color: '#a78bfa' },
-  ];
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  entries.forEach((entry, index) => {
-    const boxX = x + index * (boxWidth + gap);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.84)';
-    ctx.fillRect(boxX, y, boxWidth, 54);
-    ctx.strokeStyle = entry.color;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(boxX + 0.5, y + 0.5, boxWidth - 1, 53);
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '11px sans-serif';
-    ctx.fillText(entry.label, boxX + boxWidth / 2, y + 14);
-    ctx.fillStyle = '#f8fafc';
-    ctx.font = 'bold 21px sans-serif';
-    ctx.fillText(String(entry.value), boxX + boxWidth / 2, y + 34);
-  });
-
-  ctx.restore();
 }
 
 function drawDamageBadge(

@@ -49,7 +49,7 @@ import { getAppLayoutHtml, requireContext, requireElement } from '../ui/layout.j
 import { inBounds, tileFromCanvas } from '../utils/grid.js';
 import { InventoryController } from './inventoryController.js';
 import { drawFrame, getBoardOffset, getTileSize, renderAppMode, renderCastMenu, renderCharacterPanels, renderCombatLog, renderPartyInventory, type AppRenderRefs } from './renderer.js';
-import { COMBAT_ROLL_ANIMATION_TOTAL_MS, type AppMode, type CampaignProfile, type CombatRollAnimationState, type DragPayload, type HeroDraft, type OverlayMode } from './types.js';
+import { COMBAT_ROLL_ANIMATION_TOTAL_MS, type AppMode, type CombatRollAnimationState, type DragPayload, type HeroDraft, type OverlayMode } from './types.js';
 import { ITEM_DEFINITIONS } from '../items/items.js';
 import { getShopPrice } from '../items/shop.js';
 import { getCharacterCreationOverlayHtml, getSafeZoneOverlayHtml, getStartMenuOverlayHtml } from '../ui/overlayViews.js';
@@ -356,19 +356,6 @@ export class AppController {
     this.lastMoveStepAt = 0;
     this.resetCombatRollPresentation();
     this.syncAccountGoldFromState();
-    this.renderAll();
-    this.renderAppMode();
-  }
-
-  private rebootToMenu(): void {
-    clearPersistedGameState();
-    clearPersistedPartyInventory();
-    this.state = createGameState(Date.now(), this.profile?.heroes);
-    this.partyInventory = createStarterPartyInventory();
-    this.appMode = 'menu';
-    this.overlayMode = null;
-    this.lastMoveStepAt = 0;
-    this.resetCombatRollPresentation();
     this.renderAll();
     this.renderAppMode();
   }

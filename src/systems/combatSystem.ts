@@ -6,10 +6,8 @@ import { SKILL_DEFINITIONS } from '../heroes/skills.js';
 import type { SkillId } from '../data/skillTypes.js';
 import type { GameState } from './gameSystem.js';
 import {
-  getEquippedWeapon,
   getHeroAttackProfile,
   getHeroCastRequirementView,
-  type CastRequirementView,
 } from './weaponSystem.js';
 
 export interface AttackResult {

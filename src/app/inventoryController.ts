@@ -2,7 +2,7 @@ import { ITEM_DEFINITIONS } from '../items/index.js';
 import type { InventoryEntry } from '../items/inventory.js';
 import { persistPartyInventory } from '../systems/persistenceSystem.js';
 import { canHeroActNow, consumeHeroActionPoint, getCurrentHeroTurnResources } from '../systems/turnSystem.js';
-import { equipHandItem, getHandItemHandsRequired, takeHandItem } from '../systems/weaponSystem.js';
+import { equipHandItem, takeHandItem } from '../systems/weaponSystem.js';
 import type { GameState } from '../systems/gameSystem.js';
 import type { DragPayload, EquipSlot } from './types.js';
 

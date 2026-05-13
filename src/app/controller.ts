@@ -23,6 +23,7 @@ import {
   toggleItemUseMode,
   tryHeroAttackAtTile,
   tryHeroCastSpellAtTile,
+  tryHeroUseSkillAtTile,
   updateHoverPath,
   useActiveHeroBackpackConsumable,
   useActiveHeroSkill,
@@ -917,6 +918,12 @@ export class AppController {
         return;
       }
 
+      if (this.state.skillModeHeroId && this.state.selectedSkillId === 'dash') {
+        this.state.hoverPath = [];
+        this.state.spellPreviewTiles = [];
+        return;
+      }
+
       if (this.state.selectedSpellId === 'fireball') {
         const activeHero = this.state.party.heroes[this.state.party.activeHeroIndex];
         const targetEnemy = getCurrentRoomEnemies(this.state).find(
@@ -947,7 +954,11 @@ export class AppController {
       const target = tileFromCanvas(event.clientX - rect.left, event.clientY - rect.top, offset.x, offset.y, tileSize);
 
       if (!inBounds(target, room.width, room.height) || this.state.runState !== 'active') return;
-      if (tryHeroAttackAtTile(this.state, target) || tryHeroCastSpellAtTile(this.state, target)) {
+      if (
+        tryHeroAttackAtTile(this.state, target) ||
+        tryHeroCastSpellAtTile(this.state, target) ||
+        tryHeroUseSkillAtTile(this.state, target)
+      ) {
         this.persistAll();
         this.renderAll();
         return;

@@ -135,6 +135,8 @@ export interface SkillActionView {
   cooldownRemaining: number;
 }
 
+const DASH_TELEPORT_RANGE = 3;
+
 export interface RunSummaryView {
   result: RunState;
   seed: number;
@@ -720,7 +722,8 @@ export function getHeroPanelViews(state: GameState): HeroPanelView[] {
       movementRemaining: turnResources?.movementRemaining ?? null,
       actionPointsRemaining: turnResources?.actionPointsRemaining ?? null,
       attackSlotAvailable: turnResources?.attackSlotAvailable ?? null,
-      skillCooldownRemaining: hero.skillState.cooldownRemaining,
+      skillCooldownRemaining:
+        hero.className === 'Ranger' ? Math.max(0, hero.skillCooldowns.dash ?? 0) : hero.skillState.cooldownRemaining,
       powerStrikeArmed: hero.skillState.powerStrikeArmed,
     };
   });
@@ -928,6 +931,15 @@ export function getActiveHeroSkillActionView(state: GameState): SkillActionView 
     };
   }
 
+  if (hero.className === 'Ranger') {
+    const cooldownRemaining = Math.max(0, hero.skillCooldowns.dash ?? 0);
+    return {
+      label: state.skillModeHeroId === hero.id && state.selectedSkillId === 'dash' ? 'Dash target' : classDef.skillName,
+      isAvailable: canHeroUseSkill(state, hero.id, 'dash'),
+      cooldownRemaining,
+    };
+  }
+
   return {
     label:
       hero.className === 'Warrior' && hero.skillState.powerStrikeArmed
@@ -961,13 +973,14 @@ export function useActiveHeroSkill(state: GameState): boolean {
   }
 
   if (hero.className === 'Ranger') {
-    consumeHeroActionPoint(state, hero.id);
-    hero.skillState.cooldownRemaining = CLASS_DEFINITIONS.Ranger.skillCooldownTurns;
-    if (resources) {
-      resources.movementRemaining += 2;
-    }
-    state.recentCombatLog.unshift('Ranger used Dash: +2 movement this turn');
-    state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+    state.attackModeHeroId = null;
+    state.castModeHeroId = null;
+    state.itemUseModeHeroId = null;
+    state.movingPath = [];
+    state.hoverPath = [];
+    state.spellPreviewTiles = [];
+    state.skillModeHeroId = hero.id;
+    state.selectedSkillId = 'dash';
     return true;
   }
 
@@ -1127,6 +1140,27 @@ export function canHeroUseSkill(state: GameState, heroId: string, skillId: Skill
   return true;
 }
 
+export function getDashTeleportTargetTiles(state: GameState): Set<string> {
+  const hero = getActiveHero(state.party);
+  if (state.skillModeHeroId !== hero.id || state.selectedSkillId !== 'dash') return new Set();
+  if (!canHeroUseSkill(state, hero.id, 'dash')) return new Set();
+
+  const room = getCurrentRoom(state);
+  const targets = new Set<string>();
+  for (let y = 0; y < room.height; y += 1) {
+    for (let x = 0; x < room.width; x += 1) {
+      const target = { x, y };
+      if (sameCoord(hero.tile, target)) continue;
+      if (Math.max(Math.abs(hero.tile.x - x), Math.abs(hero.tile.y - y)) > DASH_TELEPORT_RANGE) continue;
+      if (!canWalkTile(room, target)) continue;
+      if (isTileOccupiedByOtherHero(state, room.id, target, hero.id)) continue;
+      if (isTileOccupiedByEnemy(state, room.id, target)) continue;
+      targets.add(`${x},${y}`);
+    }
+  }
+  return targets;
+}
+
 export function toggleSkillMode(state: GameState): boolean {
   if (state.runState !== 'active') return false;
   const hero = getActiveHero(state.party);
@@ -1154,9 +1188,27 @@ export function tryHeroUseSkillAtTile(state: GameState, target: Coord): boolean 
   const skill = SKILL_DEFINITIONS[skillId];
   const resources = state.turn?.heroResourcesById[hero.id];
   if (!resources) return false;
-  if (skillId === 'dash' || skillId === 'power-strike') {
+  if (skillId === 'dash') {
+    const targetKey = `${target.x},${target.y}`;
+    if (!getDashTeleportTargetTiles(state).has(targetKey)) {
+      state.recentCombatLog.unshift('Dash failed: choose an open tile within 3 squares');
+      state.recentCombatLog = state.recentCombatLog.slice(0, 6);
+      return true;
+    }
+
+    const from = { ...hero.tile };
+    updateFacing(hero.tile, target, hero);
+    hero.tile = { ...target };
+    resources.actionPointsRemaining -= skill.actionPointCost;
+    hero.skillCooldowns[skillId] = skill.cooldownTurns;
+    state.hoverPath = [];
+    state.movingPath = [];
+    state.spellPreviewTiles = [];
+    state.recentCombatLog.unshift(`Ranger used Dash: teleported from ${from.x},${from.y} to ${target.x},${target.y}`);
+    refreshExitReady(state, hero.id, hero.tile);
+    maybeTransitionRoom(state, hero.id);
+  } else if (skillId === 'power-strike') {
     const result = performHeroSkillOnSelf(hero, skillId);
-    if (skillId === 'dash') resources.movementRemaining += 2;
     resources.actionPointsRemaining -= skill.actionPointCost;
     hero.skillCooldowns[skillId] = skill.cooldownTurns;
     state.recentCombatLog.unshift(...result.logEntries);
@@ -1172,6 +1224,9 @@ export function tryHeroUseSkillAtTile(state: GameState, target: Coord): boolean 
   state.recentCombatLog = state.recentCombatLog.slice(0, 6);
   state.skillModeHeroId = null;
   state.selectedSkillId = null;
+  state.hoverPath = [];
+  state.movingPath = [];
+  state.spellPreviewTiles = [];
   return true;
 }
 

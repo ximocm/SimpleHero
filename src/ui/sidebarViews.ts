@@ -212,5 +212,5 @@ function escapeAttr(value: string): string {
 }
 
 function resolveAssetUrl(path: string): string {
-  return new URL(`../../${path}`, import.meta.url).toString();
+  return new URL(`../${path}`, import.meta.url).toString();
 }

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -44,6 +45,7 @@ def compile_typescript() -> None:
     )
 
     if result.returncode == 0:
+        copy_assets()
         BUILD_STATUS["ok"] = True
         BUILD_STATUS["message"] = "ready"
         return
@@ -51,6 +53,17 @@ def compile_typescript() -> None:
     BUILD_STATUS["ok"] = False
     stderr = result.stderr.strip() or result.stdout.strip() or "tsc failed"
     BUILD_STATUS["message"] = f"typescript build failed: {stderr}"
+
+
+def copy_assets() -> None:
+    """Copy static assets into dist for compiled module-relative URLs."""
+    source = ROOT / "assets"
+    target = ROOT / "dist" / "assets"
+    if not source.exists():
+        return
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
 
 
 class DevHandler(SimpleHTTPRequestHandler):

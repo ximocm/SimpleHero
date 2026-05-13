@@ -12,6 +12,7 @@ import {
   getCurrentRoomCoordId,
   getCurrentRoomEncounterView,
   getCurrentRoomEnemyViews,
+  getDashTeleportTargetTiles,
   getHeroPanelViews,
   getSelectedSpellDefinition,
   isBackpackConsumableTargetable,
@@ -425,10 +426,12 @@ function drawTacticalPreviewOverlay(
   tileSize: number,
   offset: Coord,
 ): void {
-  const moveTiles = getReachableMoveTiles(state, room, hero);
-  const attackTiles = getAttackRangeTiles(room, hero.tile, getHeroAttackProfile(hero).range);
+  const dashTiles = getDashTeleportTargetTiles(state);
+  const isDashTargeting = state.skillModeHeroId === hero.id && state.selectedSkillId === 'dash';
+  const moveTiles = isDashTargeting ? new Set<string>() : getReachableMoveTiles(state, room, hero);
+  const attackTiles = isDashTargeting ? new Set<string>() : getAttackRangeTiles(room, hero.tile, getHeroAttackProfile(hero).range);
 
-  if (moveTiles.size === 0 && attackTiles.size === 0) return;
+  if (moveTiles.size === 0 && attackTiles.size === 0 && dashTiles.size === 0) return;
 
   for (let y = 0; y < room.height; y += 1) {
     for (let x = 0; x < room.width; x += 1) {
@@ -441,9 +444,13 @@ function drawTacticalPreviewOverlay(
       const key = coordKey({ x, y });
       const isMoveTile = moveTiles.has(key);
       const isAttackTile = attackTiles.has(key);
-      if (!isMoveTile && !isAttackTile) continue;
+      const isDashTile = dashTiles.has(key);
+      if (!isMoveTile && !isAttackTile && !isDashTile) continue;
 
-      if (isMoveTile && isAttackTile) {
+      if (isDashTile) {
+        ctx.fillStyle = 'rgba(45, 212, 191, 0.28)';
+        ctx.strokeStyle = 'rgba(153, 246, 228, 0.85)';
+      } else if (isMoveTile && isAttackTile) {
         ctx.fillStyle = 'rgba(168, 85, 247, 0.24)';
         ctx.strokeStyle = 'rgba(196, 181, 253, 0.55)';
       } else if (isMoveTile) {
@@ -622,7 +629,9 @@ function drawHud(args: FrameRenderArgs): void {
               ? 'Attack mode: click a highlighted enemy to attack | 1/2/3 or click card = active hero'
               : state.itemUseModeHeroId
                 ? 'Item mode: click a highlighted consumable in the active hero backpack'
-                : 'Mouse hover = A* preview | Click = move/attack target | 1/2/3 or click card = active hero';
+                : state.skillModeHeroId && state.selectedSkillId === 'dash'
+                  ? 'Dash mode: click a highlighted tile within 3 squares'
+                  : 'Mouse hover = A* preview | Click = move/attack target | 1/2/3 or click card = active hero';
 
   const activeHero = state.party.heroes[state.party.activeHeroIndex];
   const activeResources = turn.heroResources;

@@ -4,7 +4,7 @@
   "private": true,
   "description": "SimpleHero web prototype",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && python3 scripts/copy_assets.py",
     "serve": "python3 scripts/dev_server.py",
     "dev": "npm run build && npm run serve"
   },
